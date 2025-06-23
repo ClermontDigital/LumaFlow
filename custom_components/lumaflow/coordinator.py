@@ -55,16 +55,16 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
         self._last_calculated_values: Dict[str, Any] = {}
         self._last_reset_date: Optional[date] = None
         
-        # Get configuration
+        # Get configuration (prefer options over data for runtime changes)
         self.lights = entry.data.get(CONF_LIGHTS, [])
         self.light_groups = entry.data.get(CONF_LIGHT_GROUPS, [])
-        self.sunset_offset = entry.data.get(CONF_SUNSET_OFFSET, DEFAULT_SUNSET_OFFSET)
-        self.transition_speed = entry.data.get(CONF_TRANSITION_SPEED, DEFAULT_TRANSITION_SPEED)
+        self.sunset_offset = entry.options.get(CONF_SUNSET_OFFSET, entry.data.get(CONF_SUNSET_OFFSET, DEFAULT_SUNSET_OFFSET))
+        self.transition_speed = entry.options.get(CONF_TRANSITION_SPEED, entry.data.get(CONF_TRANSITION_SPEED, DEFAULT_TRANSITION_SPEED))
         self.min_brightness = entry.data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
         self.max_brightness = entry.data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
         self.min_color_temp = entry.data.get(CONF_MIN_COLOR_TEMP, DEFAULT_MIN_COLOR_TEMP)
         self.max_color_temp = entry.data.get(CONF_MAX_COLOR_TEMP, DEFAULT_MAX_COLOR_TEMP)
-        self.enable_override_detection = entry.data.get(CONF_ENABLE_OVERRIDE_DETECTION, True)
+        self.enable_override_detection = entry.options.get(CONF_ENABLE_OVERRIDE_DETECTION, entry.data.get(CONF_ENABLE_OVERRIDE_DETECTION, True))
         
         # Set up location for astronomical calculations
         self._setup_location()
@@ -75,6 +75,9 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
             name=DOMAIN,
             update_interval=timedelta(minutes=1),
         )
+        
+        # Listen for options updates
+        entry.add_update_listener(self.async_options_updated)
 
     def _setup_location(self) -> None:
         """Set up location for astronomical calculations."""
@@ -248,4 +251,16 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
         """Remove light from override list."""
         if entity_id in self._overridden_lights:
             del self._overridden_lights[entity_id]
-            _LOGGER.debug("Removed override for %s", entity_id) 
+            _LOGGER.debug("Removed override for %s", entity_id)
+    
+    async def async_options_updated(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Handle options update."""
+        _LOGGER.debug("Options updated, refreshing configuration")
+        
+        # Update configuration from options
+        self.sunset_offset = entry.options.get(CONF_SUNSET_OFFSET, entry.data.get(CONF_SUNSET_OFFSET, DEFAULT_SUNSET_OFFSET))
+        self.transition_speed = entry.options.get(CONF_TRANSITION_SPEED, entry.data.get(CONF_TRANSITION_SPEED, DEFAULT_TRANSITION_SPEED))
+        self.enable_override_detection = entry.options.get(CONF_ENABLE_OVERRIDE_DETECTION, entry.data.get(CONF_ENABLE_OVERRIDE_DETECTION, True))
+        
+        # Force a refresh to apply new settings
+        await self.async_request_refresh() 

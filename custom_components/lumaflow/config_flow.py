@@ -205,11 +205,11 @@ class LumaFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Get available light entities."""
         entities = []
         
-        for entity_id, state in self.hass.states.async_all("light"):
+        for state in self.hass.states.async_all("light"):
             # Filter for colored lights or lights with color temperature support
             supported_color_modes = state.attributes.get("supported_color_modes", [])
             if any(mode in supported_color_modes for mode in ["rgb", "rgbw", "color_temp"]):
-                entities.append(entity_id)
+                entities.append(state.entity_id)
         
         return sorted(entities)
 
