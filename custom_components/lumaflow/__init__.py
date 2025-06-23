@@ -1,13 +1,11 @@
 """LumaFlow - Circadian Rhythm Lighting Integration for Home Assistant."""
 
-import asyncio
 import logging
 from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import LumaFlowCoordinator
