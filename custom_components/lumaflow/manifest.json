@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/ClermontDigital/LumaFlow/issues",
   "quality_scale": "silver",
   "requirements": ["astral>=2.2"],
-  "version": "0.1.0"
+  "version": "0.1.1"
 } 
