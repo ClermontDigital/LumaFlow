@@ -1,0 +1,98 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select Lights",
+        "description": "Choose the lights you want LumaFlow to control. Only lights that support color temperature or RGB colors will be available.",
+        "data": {
+          "lights": "Lights to control"
+        }
+      },
+      "timing": {
+        "title": "Configure Timing & Brightness",
+        "description": "Set up how LumaFlow should transition your lights through the evening.",
+        "data": {
+          "sunset_offset": "Sunset offset (minutes before/after sunset)",
+          "transition_speed": "Transition speed",
+          "min_brightness": "Minimum brightness",
+          "max_brightness": "Maximum brightness",
+          "min_color_temp": "Warmest color temperature (K)",
+          "max_color_temp": "Coolest color temperature (K)"
+        }
+      },
+      "advanced": {
+        "title": "Advanced Options",
+        "description": "Configure advanced features for LumaFlow.",
+        "data": {
+          "enable_override_detection": "Enable manual override detection",
+          "restore_on_startup": "Restore lights to current cycle on startup"
+        }
+      }
+    },
+    "error": {
+      "no_lights_selected": "Please select at least one light to control.",
+      "no_lights_found": "No compatible lights found. LumaFlow requires lights with color temperature or RGB support.",
+      "invalid_brightness_range": "Maximum brightness must be greater than minimum brightness.",
+      "invalid_color_temp_range": "Maximum color temperature must be greater than minimum color temperature."
+    },
+    "abort": {
+      "already_configured": "LumaFlow is already configured.",
+      "no_lights_found": "No compatible lights found in your Home Assistant installation."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "LumaFlow Options",
+        "description": "Update your LumaFlow configuration.",
+        "data": {
+          "sunset_offset": "Sunset offset (minutes before/after sunset)",
+          "transition_speed": "Transition speed",
+          "enable_override_detection": "Enable manual override detection"
+        }
+      }
+    }
+  },
+  "services": {
+    "enable": {
+      "name": "Enable",
+      "description": "Enable LumaFlow circadian lighting."
+    },
+    "disable": {
+      "name": "Disable",
+      "description": "Disable LumaFlow circadian lighting."
+    },
+    "restore_lights": {
+      "name": "Restore Lights",
+      "description": "Restore overridden lights to current circadian cycle.",
+      "fields": {
+        "lights": {
+          "name": "Lights",
+          "description": "Specific lights to restore (leave empty to restore all overridden lights)."
+        }
+      }
+    },
+    "override_lights": {
+      "name": "Override Lights",
+      "description": "Manually override specific lights with custom settings.",
+      "fields": {
+        "lights": {
+          "name": "Lights",
+          "description": "Lights to override."
+        },
+        "brightness": {
+          "name": "Brightness",
+          "description": "Brightness percentage (1-100)."
+        },
+        "color_temp": {
+          "name": "Color Temperature",
+          "description": "Color temperature in Kelvin (2000-6500)."
+        },
+        "rgb_color": {
+          "name": "RGB Color",
+          "description": "RGB color as a list of three values [r, g, b]."
+        }
+      }
+    }
+  }
+} 

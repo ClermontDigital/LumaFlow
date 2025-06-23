@@ -1,0 +1,14 @@
+{
+  "domain": "lumaflow",
+  "name": "LumaFlow",
+  "codeowners": ["@developersteve"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/ClermontDigital/LumaFlow",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/ClermontDigital/LumaFlow/issues",
+  "quality_scale": "silver",
+  "requirements": ["astral>=2.2"],
+  "version": "0.1.0"
+} 

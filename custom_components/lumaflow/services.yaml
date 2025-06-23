@@ -1,0 +1,61 @@
+enable:
+  name: Enable
+  description: Enable LumaFlow circadian lighting for all configured lights.
+
+disable:
+  name: Disable
+  description: Disable LumaFlow circadian lighting while preserving configuration.
+
+restore_lights:
+  name: Restore Lights
+  description: Restore overridden lights to the current circadian cycle.
+  fields:
+    lights:
+      name: Lights
+      description: Specific lights to restore. Leave empty to restore all overridden lights.
+      required: false
+      selector:
+        entity:
+          domain: light
+          multiple: true
+
+override_lights:
+  name: Override Lights
+  description: Manually override specific lights with custom settings.
+  fields:
+    lights:
+      name: Lights
+      description: Lights to override with custom settings.
+      required: true
+      selector:
+        entity:
+          domain: light
+          multiple: true
+    brightness:
+      name: Brightness
+      description: Brightness percentage (1-100).
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+    color_temp:
+      name: Color Temperature
+      description: Color temperature in Kelvin (2000-6500).
+      required: false
+      selector:
+        number:
+          min: 2000
+          max: 6500
+          step: 100
+          unit_of_measurement: "K"
+          mode: box
+    rgb_color:
+      name: RGB Color
+      description: RGB color as a list of three values [red, green, blue] (0-255).
+      required: false
+      selector:
+        color_rgb: 
