@@ -4,7 +4,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "lumaflow"
 NAME = "LumaFlow"
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 
 # Platforms
 PLATFORMS = [Platform.LIGHT, Platform.SENSOR]
