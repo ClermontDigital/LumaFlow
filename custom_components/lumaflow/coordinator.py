@@ -148,15 +148,20 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
         
         # Define phase boundaries
         if now < sunrise:
-            return PHASE_NIGHT
+            phase = PHASE_NIGHT
         elif now < sunset_adjusted:
-            return PHASE_DAY
+            phase = PHASE_DAY
         elif now < sunset_adjusted + timedelta(hours=1):
-            return PHASE_SUNSET
+            phase = PHASE_SUNSET
         elif now < sunset_adjusted + timedelta(hours=4):
-            return PHASE_EVENING
+            phase = PHASE_EVENING
         else:
-            return PHASE_NIGHT
+            phase = PHASE_NIGHT
+            
+        _LOGGER.debug("Phase calculation: now=%s, sunrise=%s, sunset=%s, sunset_adjusted=%s, phase=%s", 
+                     now.strftime("%H:%M"), sunrise.strftime("%H:%M"), sunset.strftime("%H:%M"), 
+                     sunset_adjusted.strftime("%H:%M"), phase)
+        return phase
 
     def _calculate_lighting_values(
         self, now: datetime, sun_times: Dict[str, datetime], sunset_adjusted: datetime
@@ -166,6 +171,7 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
             # Before sunset - use day values
             brightness = self.max_brightness
             color_temp = self.max_color_temp
+            _LOGGER.debug("Daylight values: brightness=%s%%, color_temp=%sK", brightness, color_temp)
             
         else:
             # After sunset - calculate based on time elapsed
@@ -182,6 +188,9 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
             # Calculate color temperature (linear decrease to warmer)
             color_temp_range = self.max_color_temp - self.min_color_temp
             color_temp = self.max_color_temp - (color_temp_range * progression)
+            
+            _LOGGER.debug("Evening values: time_since_sunset=%.1fh, progression=%.2f, brightness=%s%%, color_temp=%sK", 
+                         time_since_sunset, progression, int(brightness), int(color_temp))
         
         return {
             "brightness": int(brightness),
@@ -191,12 +200,15 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
 
     async def _update_lights(self, lighting_values: Dict[str, Any]) -> None:
         """Update light states with calculated values."""
+        updated_lights = 0
         for light_entity_id in self.lights:
             if light_entity_id in self._overridden_lights:
+                _LOGGER.debug("Skipping overridden light: %s", light_entity_id)
                 continue  # Skip overridden lights
                 
             light_state = self.hass.states.get(light_entity_id)
             if not light_state or light_state.state != "on":
+                _LOGGER.debug("Skipping light %s (state: %s)", light_entity_id, light_state.state if light_state else "unavailable")
                 continue  # Only update lights that are on
             
             # Prepare service data
@@ -209,15 +221,24 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
             # Add color temperature if supported
             if self._light_supports_color_temp(light_entity_id):
                 service_data["color_temp"] = lighting_values["color_temp"]
+                _LOGGER.info("Updating light %s: brightness=%s%%, color_temp=%sK, transition=%ss", 
+                            light_entity_id, lighting_values["brightness"], lighting_values["color_temp"], lighting_values["transition"])
+            else:
+                _LOGGER.info("Updating light %s: brightness=%s%%, transition=%ss (no color temp support)", 
+                            light_entity_id, lighting_values["brightness"], lighting_values["transition"])
             
             try:
                 await self.hass.services.async_call(
                     "light", "turn_on", service_data, blocking=True
                 )
+                updated_lights += 1
             except Exception as err:
                 _LOGGER.warning(
                     "Failed to update light %s: %s", light_entity_id, err
                 )
+        
+        if updated_lights > 0:
+            _LOGGER.info("Updated %d lights with circadian values", updated_lights)
 
     def _light_supports_color_temp(self, entity_id: str) -> bool:
         """Check if light supports color temperature."""
