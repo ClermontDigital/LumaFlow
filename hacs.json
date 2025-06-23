@@ -5,6 +5,5 @@
   "domains": ["switch", "sensor"],
   "country": ["US", "CA", "GB", "AU", "DE", "FR", "NL", "SE", "NO", "DK"],
   "homeassistant": "2023.1.0",
-  "render_readme": true,
-  "zip_release": true
+  "render_readme": true
 } 
