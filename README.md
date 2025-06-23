@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)](https://github.com/ClermontDigital/LumaFlow)
+[![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)](https://github.com/ClermontDigital/LumaFlow)
 
 LumaFlow is a sophisticated Home Assistant custom integration that automatically adjusts your smart lights to follow natural circadian rhythms. By synchronizing your lighting with astronomical sunrise and sunset times, LumaFlow creates a more comfortable and natural lighting environment that adapts throughout the day and evening, supporting your natural sleep-wake cycle.
 
@@ -381,7 +381,7 @@ ln -s $(pwd)/custom_components/lumaflow /path/to/hass/custom_components/
 
 ## Changelog
 
-### Version 0.1.2 (2024-01-XX)
+### Version 0.1.3 (2024-01-XX)
 - ✨ **Initial Release**: Complete circadian lighting system
 - 🌅 **Astronomical Calculations**: Real-time sunset/sunrise calculations
 - 🎛️ **Override System**: Manual override detection with daily reset
