@@ -278,8 +278,8 @@ class LumaFlowLight(CoordinatorEntity[LumaFlowCoordinator], LightEntity):
     def device_info(self) -> Dict[str, Any]:
         """Return device information."""
         return {
-            "identifiers": {(DOMAIN, self._config_entry.entry_id)},
-            "name": "LumaFlow",
+            "identifiers": {(DOMAIN, f"{self._config_entry.entry_id}_{self._group_name}")},
+            "name": f"LumaFlow {self._group_name.title()}",
             "manufacturer": "LumaFlow",
             "entry_type": "service",
         } 

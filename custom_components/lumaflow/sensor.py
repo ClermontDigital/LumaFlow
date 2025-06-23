@@ -50,8 +50,9 @@ class LumaFlowCurrentPhaseSensor(CoordinatorEntity[LumaFlowCoordinator], SensorE
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._config_entry = config_entry
+        self._group_name = coordinator.group_name
         self._attr_unique_id = f"{config_entry.entry_id}_{SENSOR_CURRENT_PHASE}"
-        self._attr_name = "LumaFlow Current Phase"
+        self._attr_name = f"LumaFlow {self._group_name.title()} Current Phase"
         self._attr_icon = "mdi:weather-sunset"
 
     @property
@@ -73,17 +74,17 @@ class LumaFlowCurrentPhaseSensor(CoordinatorEntity[LumaFlowCoordinator], SensorE
         return {
             "brightness": lighting_values.get("brightness"),
             "color_temp": lighting_values.get("color_temp"),
-            "enabled": data.get("enabled", False),
-            "lights_controlled": len(self.coordinator.lights),
-            "overridden_lights": len(data.get("overridden_lights", [])),
+            "group_name": self._group_name,
+            "controlled_lights": data.get("controlled_lights", []),
+            "lights_count": len(data.get("controlled_lights", [])),
         }
 
     @property
     def device_info(self) -> Dict[str, Any]:
         """Return device information."""
         return {
-            "identifiers": {(DOMAIN, self._config_entry.entry_id)},
-            "name": "LumaFlow",
+            "identifiers": {(DOMAIN, f"{self._config_entry.entry_id}_{self._group_name}")},
+            "name": f"LumaFlow {self._group_name.title()}",
             "manufacturer": "LumaFlow",
             "entry_type": "service",
         }
@@ -100,8 +101,9 @@ class LumaFlowNextTransitionSensor(CoordinatorEntity[LumaFlowCoordinator], Senso
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._config_entry = config_entry
+        self._group_name = coordinator.group_name
         self._attr_unique_id = f"{config_entry.entry_id}_{SENSOR_NEXT_TRANSITION}"
-        self._attr_name = "LumaFlow Next Transition"
+        self._attr_name = f"LumaFlow {self._group_name.title()} Next Transition"
         self._attr_icon = "mdi:clock-outline"
         self._attr_device_class = "timestamp"
 
@@ -156,8 +158,8 @@ class LumaFlowNextTransitionSensor(CoordinatorEntity[LumaFlowCoordinator], Senso
     def device_info(self) -> Dict[str, Any]:
         """Return device information."""
         return {
-            "identifiers": {(DOMAIN, self._config_entry.entry_id)},
-            "name": "LumaFlow",
+            "identifiers": {(DOMAIN, f"{self._config_entry.entry_id}_{self._group_name}")},
+            "name": f"LumaFlow {self._group_name.title()}",
             "manufacturer": "LumaFlow",
             "entry_type": "service",
         } 
