@@ -7,7 +7,7 @@ NAME = "LumaFlow"
 VERSION = "0.2.2"
 
 # Platforms
-PLATFORMS = [Platform.LIGHT, Platform.SENSOR]
+PLATFORMS = [Platform.LIGHT, Platform.SWITCH, Platform.SENSOR]
 
 # Configuration keys
 CONF_LIGHTS = "lights"

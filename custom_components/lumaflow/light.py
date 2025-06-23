@@ -188,29 +188,26 @@ class LumaFlowLight(CoordinatorEntity[LumaFlowCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the light group with circadian values."""
-        if not self._circadian_enabled:
-            # Just turn on lights without circadian adjustment
-            await self._turn_on_controlled_lights(**kwargs)
-            return
-        
-        # Get current circadian values
+        # Always get current circadian values
         lighting_values = {}
         if self.coordinator.data:
             lighting_values = self.coordinator.data.get("lighting_values", {})
         
-        # Prepare service data with circadian values
+        # Prepare service data with circadian values as defaults
         service_data = {}
         
-        # Use provided values or circadian values
-        if ATTR_BRIGHTNESS in kwargs:
-            service_data["brightness"] = kwargs[ATTR_BRIGHTNESS]
-        elif lighting_values.get("brightness"):
+        # Apply circadian values first, then override with any user-provided values
+        if lighting_values.get("brightness") and ATTR_BRIGHTNESS not in kwargs:
             service_data["brightness_pct"] = lighting_values["brightness"]
+        elif ATTR_BRIGHTNESS in kwargs:
+            service_data["brightness"] = kwargs[ATTR_BRIGHTNESS]
         
-        if ATTR_COLOR_TEMP in kwargs:
-            service_data["color_temp"] = kwargs[ATTR_COLOR_TEMP]
-        elif lighting_values.get("color_temp") and ColorMode.COLOR_TEMP in self._attr_supported_color_modes:
+        if (lighting_values.get("color_temp") and 
+            ColorMode.COLOR_TEMP in self._attr_supported_color_modes and 
+            ATTR_COLOR_TEMP not in kwargs):
             service_data["color_temp"] = lighting_values["color_temp"]
+        elif ATTR_COLOR_TEMP in kwargs:
+            service_data["color_temp"] = kwargs[ATTR_COLOR_TEMP]
         
         if ATTR_RGB_COLOR in kwargs:
             service_data["rgb_color"] = kwargs[ATTR_RGB_COLOR]
@@ -220,11 +217,15 @@ class LumaFlowLight(CoordinatorEntity[LumaFlowCoordinator], LightEntity):
         elif lighting_values.get("transition"):
             service_data["transition"] = lighting_values["transition"]
         
-        # Turn on all controlled lights with circadian values
-        await self._turn_on_controlled_lights(**service_data)
+        # Get enabled lights from switches
+        enabled_lights = await self._get_enabled_lights()
         
-        _LOGGER.info("LumaFlow light %s turned on with circadian values: %s", 
-                    self.name, service_data)
+        # Turn on only enabled controlled lights with circadian values
+        await self._turn_on_controlled_lights(enabled_lights, **service_data)
+        
+        current_phase = self.coordinator.data.get("current_phase", "unknown") if self.coordinator.data else "unknown"
+        _LOGGER.info("LumaFlow light %s turned on with circadian values for phase '%s': %s", 
+                    self.name, current_phase, service_data)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off all controlled lights."""
@@ -240,15 +241,33 @@ class LumaFlowLight(CoordinatorEntity[LumaFlowCoordinator], LightEntity):
         
         _LOGGER.info("LumaFlow light %s turned off", self.name)
 
-    async def _turn_on_controlled_lights(self, **kwargs: Any) -> None:
-        """Turn on all controlled lights with given parameters."""
+    async def _get_enabled_lights(self) -> list[str]:
+        """Get list of enabled lights from individual switches."""
+        enabled_lights = []
+        
+        # Check each light's individual switch state
         for light_id in self._controlled_lights:
+            switch_entity_id = f"switch.{light_id.replace('.', '_').replace('light_', '')}_lumaflow"
+            switch_state = self.hass.states.get(switch_entity_id)
+            
+            # Default to enabled if switch doesn't exist yet
+            if switch_state is None or switch_state.state == "on":
+                enabled_lights.append(light_id)
+            else:
+                _LOGGER.debug("Skipping disabled light: %s", light_id)
+        
+        return enabled_lights
+
+    async def _turn_on_controlled_lights(self, lights_to_control: list[str], **kwargs: Any) -> None:
+        """Turn on specified controlled lights with given parameters."""
+        for light_id in lights_to_control:
             service_data = {"entity_id": light_id, **kwargs}
             
             try:
                 await self.hass.services.async_call(
                     "light", "turn_on", service_data, blocking=True
                 )
+                _LOGGER.debug("Applied circadian values to %s: %s", light_id, service_data)
             except Exception as err:
                 _LOGGER.warning("Failed to turn on light %s: %s", light_id, err)
 
