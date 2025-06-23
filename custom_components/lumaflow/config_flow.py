@@ -12,7 +12,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_LIGHTS,
-    CONF_LIGHT_GROUPS,
+    CONF_GROUP_NAME,
     CONF_SUNSET_OFFSET,
     CONF_TRANSITION_SPEED,
     CONF_MIN_BRIGHTNESS,
@@ -48,18 +48,27 @@ class LumaFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> FlowResult:
-        """Handle the initial step."""
+        """Handle the initial step - create light group."""
         errors: Dict[str, str] = {}
 
         if user_input is not None:
-            # Validate light selection
+            # Validate input
+            group_name = user_input.get(CONF_GROUP_NAME, "").strip()
             lights = user_input.get(CONF_LIGHTS, [])
-            if not lights:
+            
+            if not group_name:
+                errors["base"] = "no_group_name"
+            elif not lights:
                 errors["base"] = "no_lights_selected"
             else:
-                # Store light selection and move to timing configuration
-                self._data.update(user_input)
-                return await self.async_step_timing()
+                # Check if group name would create duplicate entity
+                entity_id = f"light.{group_name.lower().replace(' ', '_')}_lumaflow"
+                if entity_id in self.hass.states.async_entity_ids("light"):
+                    errors["base"] = "group_name_exists"
+                else:
+                    # Store data and move to timing configuration
+                    self._data.update(user_input)
+                    return await self.async_step_timing()
 
         # Get available lights
         light_entities = await self._get_light_entities()
@@ -68,6 +77,7 @@ class LumaFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="no_lights_found")
 
         data_schema = vol.Schema({
+            vol.Required(CONF_GROUP_NAME): str,
             vol.Required(CONF_LIGHTS): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain="light",
@@ -181,9 +191,10 @@ class LumaFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._data.update(user_input)
             
-            # Create the config entry
+            # Create the config entry with group name as title
+            group_name = self._data.get(CONF_GROUP_NAME, "LumaFlow Group")
             return self.async_create_entry(
-                title=NAME,
+                title=f"LumaFlow - {group_name}",
                 data=self._data,
             )
 
@@ -221,7 +232,7 @@ class LumaFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class LumaFlowOptionsFlow(config_entries.OptionsFlow):
-    """Handle options flow for LumaFlow."""
+    """Handle options for LumaFlow."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
@@ -230,17 +241,17 @@ class LumaFlowOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> FlowResult:
-        """Handle options flow."""
+        """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
-
-        options = self.config_entry.options
-        current_data = self.config_entry.data
 
         data_schema = vol.Schema({
             vol.Required(
                 CONF_SUNSET_OFFSET,
-                default=options.get(CONF_SUNSET_OFFSET, current_data.get(CONF_SUNSET_OFFSET, DEFAULT_SUNSET_OFFSET))
+                default=self.config_entry.options.get(
+                    CONF_SUNSET_OFFSET,
+                    self.config_entry.data.get(CONF_SUNSET_OFFSET, DEFAULT_SUNSET_OFFSET)
+                )
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=-120,
@@ -252,7 +263,10 @@ class LumaFlowOptionsFlow(config_entries.OptionsFlow):
             ),
             vol.Required(
                 CONF_TRANSITION_SPEED,
-                default=options.get(CONF_TRANSITION_SPEED, current_data.get(CONF_TRANSITION_SPEED, DEFAULT_TRANSITION_SPEED))
+                default=self.config_entry.options.get(
+                    CONF_TRANSITION_SPEED,
+                    self.config_entry.data.get(CONF_TRANSITION_SPEED, DEFAULT_TRANSITION_SPEED)
+                )
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=["slow", "moderate", "fast"],
@@ -261,7 +275,10 @@ class LumaFlowOptionsFlow(config_entries.OptionsFlow):
             ),
             vol.Required(
                 CONF_ENABLE_OVERRIDE_DETECTION,
-                default=options.get(CONF_ENABLE_OVERRIDE_DETECTION, current_data.get(CONF_ENABLE_OVERRIDE_DETECTION, DEFAULT_ENABLE_OVERRIDE_DETECTION))
+                default=self.config_entry.options.get(
+                    CONF_ENABLE_OVERRIDE_DETECTION,
+                    self.config_entry.data.get(CONF_ENABLE_OVERRIDE_DETECTION, DEFAULT_ENABLE_OVERRIDE_DETECTION)
+                )
             ): selector.BooleanSelector(),
         })
 

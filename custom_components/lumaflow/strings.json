@@ -2,49 +2,51 @@
   "config": {
     "step": {
       "user": {
-        "title": "Select Lights",
-        "description": "Choose the lights you want LumaFlow to control. Only lights that support color temperature or RGB colors will be available.",
+        "title": "Create LumaFlow Light Group",
+        "description": "Create a new circadian light group that will control multiple physical lights.",
         "data": {
-          "lights": "Lights to control"
+          "group_name": "Group name (will create light.[name]_lumaflow)",
+          "lights": "Physical lights to control"
         }
       },
       "timing": {
-        "title": "Configure Timing & Brightness",
-        "description": "Set up how LumaFlow should transition your lights through the evening.",
+        "title": "Circadian Timing Settings",
+        "description": "Configure when and how circadian lighting changes occur.",
         "data": {
           "sunset_offset": "Sunset offset (minutes before/after sunset)",
           "transition_speed": "Transition speed",
           "min_brightness": "Minimum brightness",
           "max_brightness": "Maximum brightness",
-          "min_color_temp": "Warmest color temperature (K)",
-          "max_color_temp": "Coolest color temperature (K)"
+          "min_color_temp": "Minimum color temperature (warmest)",
+          "max_color_temp": "Maximum color temperature (coolest)"
         }
       },
       "advanced": {
         "title": "Advanced Options",
-        "description": "Configure advanced features for LumaFlow.",
+        "description": "Optional settings for enhanced functionality.",
         "data": {
           "enable_override_detection": "Enable manual override detection",
-          "restore_on_startup": "Restore lights to current cycle on startup"
+          "restore_on_startup": "Restore circadian control on startup"
         }
       }
     },
     "error": {
-      "no_lights_selected": "Please select at least one light to control.",
-      "no_lights_found": "No compatible lights found. LumaFlow requires lights with color temperature or RGB support.",
-      "invalid_brightness_range": "Maximum brightness must be greater than minimum brightness.",
-      "invalid_color_temp_range": "Maximum color temperature must be greater than minimum color temperature."
+      "no_group_name": "Please enter a group name",
+      "no_lights_selected": "Please select at least one light",
+      "group_name_exists": "A light entity with this name already exists",
+      "no_lights_found": "No compatible lights found",
+      "invalid_brightness_range": "Minimum brightness must be less than maximum brightness",
+      "invalid_color_temp_range": "Minimum color temperature must be less than maximum color temperature"
     },
     "abort": {
-      "already_configured": "LumaFlow is already configured.",
-      "no_lights_found": "No compatible lights found in your Home Assistant installation."
+      "no_lights_found": "No compatible lights were found. LumaFlow requires lights with color temperature or RGB support."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "LumaFlow Options",
-        "description": "Update your LumaFlow configuration.",
+        "description": "Update your LumaFlow light group configuration.",
         "data": {
           "sunset_offset": "Sunset offset (minutes before/after sunset)",
           "transition_speed": "Transition speed",

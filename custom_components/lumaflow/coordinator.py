@@ -17,7 +17,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_LIGHTS,
-    CONF_LIGHT_GROUPS,
+    CONF_GROUP_NAME,
     CONF_SUNSET_OFFSET,
     CONF_TRANSITION_SPEED,
     CONF_MIN_BRIGHTNESS,
@@ -50,14 +50,11 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
         """Initialize the coordinator."""
         self.hass = hass
         self.entry = entry
-        self._enabled = True
-        self._overridden_lights: Dict[str, Dict[str, Any]] = {}
-        self._last_calculated_values: Dict[str, Any] = {}
         self._last_reset_date: Optional[date] = None
         
         # Get configuration (prefer options over data for runtime changes)
-        self.lights = entry.data.get(CONF_LIGHTS, [])
-        self.light_groups = entry.data.get(CONF_LIGHT_GROUPS, [])
+        self.group_name = entry.data.get(CONF_GROUP_NAME, "circadian")
+        self.controlled_lights = entry.data.get(CONF_LIGHTS, [])
         self.sunset_offset = entry.options.get(CONF_SUNSET_OFFSET, entry.data.get(CONF_SUNSET_OFFSET, DEFAULT_SUNSET_OFFSET))
         self.transition_speed = entry.options.get(CONF_TRANSITION_SPEED, entry.data.get(CONF_TRANSITION_SPEED, DEFAULT_TRANSITION_SPEED))
         self.min_brightness = entry.data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
@@ -72,7 +69,7 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass,
             _LOGGER,
-            name=DOMAIN,
+            name=f"{DOMAIN}_{self.group_name}",
             update_interval=timedelta(minutes=1),
         )
         
@@ -94,22 +91,15 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
         )
         
         _LOGGER.debug(
-            "Location setup: lat=%s, lon=%s, tz=%s",
-            latitude, longitude, timezone
+            "Location setup for %s: lat=%s, lon=%s, tz=%s",
+            self.group_name, latitude, longitude, timezone
         )
 
     async def _async_update_data(self) -> Dict[str, Any]:
-        """Update data."""
+        """Update circadian data."""
         try:
             now = dt_util.utcnow()
             today = now.date()
-            
-            # Check for daily override reset (per PRD requirement)
-            if self._last_reset_date != today:
-                if self._overridden_lights:
-                    _LOGGER.info("Daily reset: clearing %d overridden lights", len(self._overridden_lights))
-                    self._overridden_lights.clear()
-                self._last_reset_date = today
             
             # Calculate astronomical times
             sun_times = sun(self.location.observer, date=today)
@@ -123,21 +113,17 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
             # Calculate lighting values based on current phase
             lighting_values = self._calculate_lighting_values(now, sun_times, sunset_adjusted)
             
-            # Update lights if enabled and not overridden
-            if self._enabled:
-                await self._update_lights(lighting_values)
-            
             return {
                 "sun_times": sun_times,
                 "sunset_adjusted": sunset_adjusted,
                 "current_phase": current_phase,
                 "lighting_values": lighting_values,
-                "enabled": self._enabled,
-                "overridden_lights": list(self._overridden_lights.keys()),
+                "controlled_lights": self.controlled_lights,
+                "group_name": self.group_name,
             }
             
         except Exception as err:
-            raise UpdateFailed(f"Error updating LumaFlow data: {err}") from err
+            raise UpdateFailed(f"Error updating LumaFlow data for {self.group_name}: {err}") from err
 
     def _calculate_current_phase(
         self, now: datetime, sun_times: Dict[str, datetime], sunset_adjusted: datetime
@@ -158,8 +144,8 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
         else:
             phase = PHASE_NIGHT
             
-        _LOGGER.debug("Phase calculation: now=%s, sunrise=%s, sunset=%s, sunset_adjusted=%s, phase=%s", 
-                     now.strftime("%H:%M"), sunrise.strftime("%H:%M"), sunset.strftime("%H:%M"), 
+        _LOGGER.debug("Phase calculation for %s: now=%s, sunrise=%s, sunset=%s, sunset_adjusted=%s, phase=%s", 
+                     self.group_name, now.strftime("%H:%M"), sunrise.strftime("%H:%M"), sunset.strftime("%H:%M"), 
                      sunset_adjusted.strftime("%H:%M"), phase)
         return phase
 
@@ -171,7 +157,8 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
             # Before sunset - use day values
             brightness = self.max_brightness
             color_temp = self.max_color_temp
-            _LOGGER.debug("Daylight values: brightness=%s%%, color_temp=%sK", brightness, color_temp)
+            _LOGGER.debug("Daylight values for %s: brightness=%s%%, color_temp=%sK", 
+                         self.group_name, brightness, color_temp)
             
         else:
             # After sunset - calculate based on time elapsed
@@ -189,94 +176,18 @@ class LumaFlowCoordinator(DataUpdateCoordinator):
             color_temp_range = self.max_color_temp - self.min_color_temp
             color_temp = self.max_color_temp - (color_temp_range * progression)
             
-            _LOGGER.debug("Evening values: time_since_sunset=%.1fh, progression=%.2f, brightness=%s%%, color_temp=%sK", 
-                         time_since_sunset, progression, int(brightness), int(color_temp))
+            _LOGGER.debug("Evening values for %s: time_since_sunset=%.1fh, progression=%.2f, brightness=%s%%, color_temp=%sK", 
+                         self.group_name, time_since_sunset, progression, int(brightness), int(color_temp))
         
         return {
             "brightness": int(brightness),
             "color_temp": int(color_temp),
             "transition": TRANSITION_SPEEDS.get(self.transition_speed, 180),
         }
-
-    async def _update_lights(self, lighting_values: Dict[str, Any]) -> None:
-        """Update light states with calculated values."""
-        updated_lights = 0
-        for light_entity_id in self.lights:
-            if light_entity_id in self._overridden_lights:
-                _LOGGER.debug("Skipping overridden light: %s", light_entity_id)
-                continue  # Skip overridden lights
-                
-            light_state = self.hass.states.get(light_entity_id)
-            if not light_state or light_state.state != "on":
-                _LOGGER.debug("Skipping light %s (state: %s)", light_entity_id, light_state.state if light_state else "unavailable")
-                continue  # Only update lights that are on
-            
-            # Prepare service data
-            service_data = {
-                "entity_id": light_entity_id,
-                "brightness_pct": lighting_values["brightness"],
-                "transition": lighting_values["transition"],
-            }
-            
-            # Add color temperature if supported
-            if self._light_supports_color_temp(light_entity_id):
-                service_data["color_temp"] = lighting_values["color_temp"]
-                _LOGGER.info("Updating light %s: brightness=%s%%, color_temp=%sK, transition=%ss", 
-                            light_entity_id, lighting_values["brightness"], lighting_values["color_temp"], lighting_values["transition"])
-            else:
-                _LOGGER.info("Updating light %s: brightness=%s%%, transition=%ss (no color temp support)", 
-                            light_entity_id, lighting_values["brightness"], lighting_values["transition"])
-            
-            try:
-                await self.hass.services.async_call(
-                    "light", "turn_on", service_data, blocking=True
-                )
-                updated_lights += 1
-            except Exception as err:
-                _LOGGER.warning(
-                    "Failed to update light %s: %s", light_entity_id, err
-                )
-        
-        if updated_lights > 0:
-            _LOGGER.info("Updated %d lights with circadian values", updated_lights)
-
-    def _light_supports_color_temp(self, entity_id: str) -> bool:
-        """Check if light supports color temperature."""
-        light_state = self.hass.states.get(entity_id)
-        if not light_state:
-            return False
-        
-        supported_color_modes = light_state.attributes.get("supported_color_modes", [])
-        return "color_temp" in supported_color_modes
-
-    @callback
-    def enable(self) -> None:
-        """Enable LumaFlow."""
-        self._enabled = True
-        _LOGGER.info("LumaFlow enabled")
-
-    @callback
-    def disable(self) -> None:
-        """Disable LumaFlow."""
-        self._enabled = False
-        _LOGGER.info("LumaFlow disabled")
-
-    @callback
-    def add_override(self, entity_id: str, original_state: Dict[str, Any]) -> None:
-        """Add light to override list."""
-        self._overridden_lights[entity_id] = original_state
-        _LOGGER.debug("Added override for %s", entity_id)
-
-    @callback
-    def remove_override(self, entity_id: str) -> None:
-        """Remove light from override list."""
-        if entity_id in self._overridden_lights:
-            del self._overridden_lights[entity_id]
-            _LOGGER.debug("Removed override for %s", entity_id)
     
     async def async_options_updated(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Handle options update."""
-        _LOGGER.debug("Options updated, refreshing configuration")
+        _LOGGER.debug("Options updated for %s, refreshing configuration", self.group_name)
         
         # Update configuration from options
         self.sunset_offset = entry.options.get(CONF_SUNSET_OFFSET, entry.data.get(CONF_SUNSET_OFFSET, DEFAULT_SUNSET_OFFSET))

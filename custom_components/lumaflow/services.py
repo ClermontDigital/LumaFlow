@@ -45,39 +45,48 @@ def async_setup_services(hass: HomeAssistant) -> None:
         """Handle enable service call."""
         _LOGGER.debug("Enable service called")
         
-        # Find all LumaFlow coordinators and enable them
+        # Enable all LumaFlow light entities
+        for entity_id in hass.states.async_entity_ids("light"):
+            if "_lumaflow" in entity_id:
+                state = hass.states.get(entity_id)
+                if state and hasattr(state, 'enable_circadian'):
+                    await hass.async_add_executor_job(state.enable_circadian)
+        
+        # Also enable all coordinators
         for config_entry_id, coordinator in hass.data.get(DOMAIN, {}).items():
-            coordinator.enable()
             await coordinator.async_request_refresh()
     
     async def async_disable_service(call: ServiceCall) -> None:
         """Handle disable service call."""
         _LOGGER.debug("Disable service called")
         
-        # Find all LumaFlow coordinators and disable them
-        for config_entry_id, coordinator in hass.data.get(DOMAIN, {}).items():
-            coordinator.disable()
-            await coordinator.async_request_refresh()
+        # Disable all LumaFlow light entities
+        for entity_id in hass.states.async_entity_ids("light"):
+            if "_lumaflow" in entity_id:
+                state = hass.states.get(entity_id)
+                if state and hasattr(state, 'disable_circadian'):
+                    await hass.async_add_executor_job(state.disable_circadian)
     
     async def async_restore_lights_service(call: ServiceCall) -> None:
         """Handle restore lights service call."""
         lights = call.data.get(ATTR_LIGHTS, [])
         _LOGGER.debug("Restore lights service called for: %s", lights)
         
-        # Find all LumaFlow coordinators
-        for config_entry_id, coordinator in hass.data.get(DOMAIN, {}).items():
-            if not lights:
-                # Restore all lights if none specified
-                lights_to_restore = list(coordinator._overridden_lights.keys())
-            else:
-                # Restore only specified lights
-                lights_to_restore = [light for light in lights if light in coordinator._overridden_lights]
-            
-            for light_entity_id in lights_to_restore:
-                coordinator.remove_override(light_entity_id)
-            
-            if lights_to_restore:
-                await coordinator.async_request_refresh()
+        # Restore specified LumaFlow lights or all if none specified
+        if not lights:
+            # Restore all LumaFlow light entities
+            lights = [entity_id for entity_id in hass.states.async_entity_ids("light") if "_lumaflow" in entity_id]
+        
+        for light_entity_id in lights:
+            if "_lumaflow" in light_entity_id:
+                # Enable circadian for LumaFlow entities
+                state = hass.states.get(light_entity_id)
+                if state and hasattr(state, 'enable_circadian'):
+                    await hass.async_add_executor_job(state.enable_circadian)
+                    # Turn on with circadian values
+                    await hass.services.async_call(
+                        "light", "turn_on", {"entity_id": light_entity_id}, blocking=True
+                    )
     
     async def async_override_lights_service(call: ServiceCall) -> None:
         """Handle override lights service call."""
@@ -90,19 +99,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
         
         # Apply override to specified lights
         for light_entity_id in lights:
-            light_state = hass.states.get(light_entity_id)
-            if not light_state:
-                _LOGGER.warning("Light not found: %s", light_entity_id)
-                continue
-            
-            # Store original state
-            original_state = {
-                "brightness": light_state.attributes.get("brightness"),
-                "color_temp": light_state.attributes.get("color_temp"),
-                "rgb_color": light_state.attributes.get("rgb_color"),
-            }
-            
-            # Prepare service data for override
             service_data = {"entity_id": light_entity_id}
             
             if brightness is not None:
@@ -112,16 +108,17 @@ def async_setup_services(hass: HomeAssistant) -> None:
             if rgb_color is not None:
                 service_data["rgb_color"] = rgb_color
             
-            # Apply the override
             try:
+                # Turn on light with override settings
                 await hass.services.async_call(
                     "light", "turn_on", service_data, blocking=True
                 )
                 
-                # Mark light as overridden in all coordinators
-                for config_entry_id, coordinator in hass.data.get(DOMAIN, {}).items():
-                    if light_entity_id in coordinator.lights:
-                        coordinator.add_override(light_entity_id, original_state)
+                # If it's a LumaFlow entity, mark as overridden
+                if "_lumaflow" in light_entity_id:
+                    state = hass.states.get(light_entity_id)
+                    if state and hasattr(state, 'set_override'):
+                        await hass.async_add_executor_job(state.set_override, True)
                         
             except Exception as err:
                 _LOGGER.error("Failed to override light %s: %s", light_entity_id, err)

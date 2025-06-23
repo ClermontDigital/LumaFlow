@@ -4,14 +4,15 @@ from homeassistant.const import Platform
 
 DOMAIN = "lumaflow"
 NAME = "LumaFlow"
-VERSION = "0.1.5"
+VERSION = "0.2.0"
 
 # Platforms
-PLATFORMS = [Platform.SWITCH, Platform.SENSOR]
+PLATFORMS = [Platform.LIGHT, Platform.SENSOR]
 
 # Configuration keys
 CONF_LIGHTS = "lights"
 CONF_LIGHT_GROUPS = "light_groups"
+CONF_GROUP_NAME = "group_name"
 CONF_SUNSET_OFFSET = "sunset_offset"
 CONF_TRANSITION_SPEED = "transition_speed"
 CONF_MIN_BRIGHTNESS = "min_brightness"
@@ -46,7 +47,6 @@ PHASE_NIGHT = "night"
 PHASE_SUNRISE = "sunrise"
 
 # Entity IDs
-SWITCH_ENTITY_ID = "lumaflow_enabled"
 SENSOR_CURRENT_PHASE = "lumaflow_current_phase"
 SENSOR_NEXT_TRANSITION = "lumaflow_next_transition"
 
@@ -61,4 +61,8 @@ ATTR_LIGHTS = "lights"
 ATTR_BRIGHTNESS = "brightness"
 ATTR_COLOR_TEMP = "color_temp"
 ATTR_RGB_COLOR = "rgb_color"
-ATTR_TRANSITION = "transition" 
+ATTR_TRANSITION = "transition"
+ATTR_CIRCADIAN_ENABLED = "circadian_enabled"
+ATTR_CURRENT_PHASE = "current_phase"
+ATTR_OVERRIDDEN = "overridden"
+ATTR_CONTROLLED_LIGHTS = "controlled_lights" 
