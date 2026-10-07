@@ -31,14 +31,15 @@ from homeassistant.components.light import (
     LightEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_ENTITY_ID, ATTR_SUPPORTED_FEATURES, EVENT_HOMEASSISTANT_STARTED, STATE_ON
-from homeassistant.core import Context, CoreState, Event, EventStateChangedData, HomeAssistant, callback
+from homeassistant.const import ATTR_ENTITY_ID, ATTR_SUPPORTED_FEATURES, STATE_ON
+from homeassistant.core import Context, Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_change,
     async_track_time_interval,
 )
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.sun import get_astral_event_date, get_astral_location
 from homeassistant.util import color as color_util
 from homeassistant.util import dt as dt_util
@@ -170,10 +171,9 @@ class LumaFlowController:
             self.hass, self._tick, timedelta(seconds=UPDATE_INTERVAL_SECONDS)))
         self._unsubs.append(async_track_time_change(self.hass, self._midnight, hour=0, minute=0, second=1))
         self._watch_lights()
-        if self.hass.state is CoreState.running:
-            self._startup()
-        else:
-            self._unsubs.append(self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, lambda _e: self._startup()))
+        # Runs now if Home Assistant is already up, otherwise once it has started. The returned
+        # unsubscribe is safe to call either way (a bare listen_once isn't once it has fired).
+        self._unsubs.append(async_at_started(self.hass, self._started))
 
     @callback
     def async_stop(self) -> None:
@@ -190,6 +190,10 @@ class LumaFlowController:
             self._unsub_lights()
         watch = sorted(set(self.lights()) | set(self.configured))
         self._unsub_lights = async_track_state_change_event(self.hass, watch, self._light_changed) if watch else None
+
+    @callback
+    def _started(self, _hass: HomeAssistant) -> None:
+        self._startup()
 
     @callback
     def _startup(self) -> None:

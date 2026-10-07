@@ -6,7 +6,8 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed, async_mock_service
 
 from custom_components.lumaflow.const import DOMAIN
-from homeassistant.core import Context, HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import Context, CoreState, HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.util import dt as dt_util
@@ -232,3 +233,18 @@ async def test_options_flow_switches_mode(hass, lights):
         "sunset_offset": 0, "fade_in_minutes": 60, "fade_in_brightness": 50, "fade_in_color": "white",
         "enable_override_detection": True, "restore_on_startup": True})
     assert r["type"] == "create_entry" and entry.options["mode"] == "fade_in" and entry.options["fade_in_brightness"] == 50
+
+
+async def test_loading_while_home_assistant_starts(hass, lights, caplog):
+    """The usual case on a real install: LumaFlow loads before Home Assistant has finished starting."""
+    hass.set_state(CoreState.starting)
+    entry = await _setup(hass, ["light.ct"])
+    assert not lights   # nothing until Home Assistant is up
+    hass.set_state(CoreState.running)
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+    await hass.async_block_till_done()
+    assert "light.ct" in _sent(lights)
+    # Reloading afterwards (as saving options does) must not trip over the spent startup listener.
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert "Unable to remove" not in caplog.text and "never awaited" not in caplog.text

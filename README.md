@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/ClermontDigital/LumaFlow/releases)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/ClermontDigital/LumaFlow/releases)
 
 LumaFlow automatically adjusts your smart lights to follow natural circadian rhythms, and can switch
 them on before sunset so the house is lit by the time it's dark. It takes
@@ -360,6 +360,11 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements_test.txt
 - **Time-limited overrides**
 
 ## Changelog
+
+### Version 1.1.1
+- Fixed loading while Home Assistant starts. The "Home Assistant has started" hook ran outside the
+  event loop, so the startup refresh was skipped with a warning, and reloading the entry afterwards
+  logged "Unable to remove unknown job listener".
 
 ### Version 1.1.0
 - **Fade on before sunset.** Lights that are off come on at 1% before sunset and brighten so
