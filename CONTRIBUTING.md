@@ -115,6 +115,7 @@ class ExampleClass:
 ## 🧪 Testing Guidelines
 
 ### Manual Testing Checklist
+Run the automated tests first (see Architecture Overview), then:
 - [ ] Test with RGB lights (Hue, LIFX, etc.)
 - [ ] Test with color temperature lights
 - [ ] Test with white-only lights
@@ -142,32 +143,24 @@ If possible, test with these popular brands:
 ## 🏗️ Architecture Overview
 
 ### Key Components
-- **Coordinator**: Central data management and astronomical calculations
-- **Config Flow**: Multi-step setup and options handling
-- **Entities**: Switch and sensor entities for HA integration
-- **Services**: Manual control and override functionality
+- **`circadian.py`**: the curve. Pure Python with no Home Assistant imports: given the time and the
+  sun events for yesterday, today and tomorrow, it returns the phase, brightness, colour
+  temperature and next transition.
+- **`controller.py`**: one per config entry. Reads sunrise and sunset from Home Assistant, applies
+  the curve every minute to lights that are on, expands light groups, detects manual overrides
+  and clears them at midnight.
+- **`config_flow.py`**: three-step setup and an options flow covering every setting.
+- **`switch.py`, `sensor.py`**: `switch.lumaflow`, `sensor.lumaflow_current_phase` and
+  `sensor.lumaflow_next_transition`.
+- **`services.py`**: `enable`, `disable`, `restore_lights` and `override_lights`.
 
-### Data Flow
+### Automated tests
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements_test.txt
+.venv/bin/pytest -q
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌────────────────┐
-│   Coordinator   │────│   Light Control  │────│     Lights     │
-│                 │    │                  │    │                │
-│ • Astronomical  │    │ • State Checking │    │ • RGB Lights   │
-│   Calculations  │    │ • Override       │    │ • Color Temp   │
-│ • Phase Logic   │    │   Detection      │    │ • White Only   │
-│ • Daily Reset   │    │ • Service Calls  │    │                │
-└─────────────────┘    └──────────────────┘    └────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-                    ┌────────────────────┐
-                    │   Home Assistant   │
-                    │                    │
-                    │ • Entities         │
-                    │ • Automations      │
-                    │ • UI Integration   │
-                    └────────────────────┘
-```
+`tests/test_circadian.py` covers the curve (including after midnight and late summer sunsets), and
+`tests/test_integration.py` runs the integration against fake lights.
 
 ## 📋 Pull Request Process
 

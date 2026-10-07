@@ -1,165 +1,68 @@
-"""Sensor platform for LumaFlow."""
+"""Sensors: the current circadian phase and when the next phase starts."""
+from __future__ import annotations
 
-import logging
-from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from datetime import datetime
+from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import (
-    DOMAIN,
-    SENSOR_CURRENT_PHASE,
-    SENSOR_NEXT_TRANSITION,
-    PHASE_DAY,
-    PHASE_SUNSET,
-    PHASE_EVENING,
-    PHASE_NIGHT,
-    PHASE_SUNRISE,
-)
-from .coordinator import LumaFlowCoordinator
-
-_LOGGER = logging.getLogger(__name__)
+from . import circadian
+from .const import DOMAIN
+from .controller import LumaFlowController
+from .entity import LumaFlowEntity
 
 
-async def async_setup_entry(
-    hass: HomeAssistant,
-    config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
-) -> None:
-    """Set up LumaFlow sensor platform."""
-    coordinator: LumaFlowCoordinator = hass.data[DOMAIN][config_entry.entry_id]
-    
-    async_add_entities([
-        LumaFlowCurrentPhaseSensor(coordinator, config_entry),
-        LumaFlowNextTransitionSensor(coordinator, config_entry),
-    ])
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+    controller = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities([PhaseSensor(controller), NextTransitionSensor(controller)])
 
 
-class LumaFlowCurrentPhaseSensor(CoordinatorEntity[LumaFlowCoordinator], SensorEntity):
-    """Sensor for current circadian phase."""
+class PhaseSensor(LumaFlowEntity, SensorEntity):
+    _attr_translation_key = "current_phase"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = circadian.PHASES
+    _attr_icon = "mdi:theme-light-dark"
 
-    def __init__(
-        self,
-        coordinator: LumaFlowCoordinator,
-        config_entry: ConfigEntry,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._config_entry = config_entry
-        self._group_name = coordinator.group_name
-        self._attr_unique_id = f"{config_entry.entry_id}_{SENSOR_CURRENT_PHASE}"
-        self._attr_name = f"LumaFlow {self._group_name.title()} Current Phase"
-        self._attr_icon = "mdi:weather-sunset"
+    def __init__(self, controller: LumaFlowController) -> None:
+        super().__init__(controller, "current_phase")
 
     @property
-    def native_value(self) -> Optional[str]:
-        """Return the current phase."""
-        if not self.coordinator.data:
-            return None
-        return self.coordinator.data.get("current_phase")
+    def native_value(self) -> str | None:
+        return self.controller.target.phase if self.controller.target else None
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
-        """Return extra state attributes."""
-        if not self.coordinator.data:
+    def extra_state_attributes(self) -> dict[str, Any]:
+        c, t, sun = self.controller, self.controller.target, self.controller.sun
+        if not t:
             return {}
-        
-        data = self.coordinator.data
-        lighting_values = data.get("lighting_values", {})
-        
         return {
-            "brightness": lighting_values.get("brightness"),
-            "color_temp": lighting_values.get("color_temp"),
-            "group_name": self._group_name,
-            "controlled_lights": data.get("controlled_lights", []),
-            "lights_count": len(data.get("controlled_lights", [])),
-        }
-
-    @property
-    def device_info(self) -> Dict[str, Any]:
-        """Return device information."""
-        return {
-            "identifiers": {(DOMAIN, f"{self._config_entry.entry_id}_{self._group_name}")},
-            "name": f"LumaFlow {self._group_name.title()}",
-            "manufacturer": "LumaFlow",
-            "entry_type": "service",
+            "brightness_pct": t.brightness,
+            "color_temp_kelvin": t.kelvin,
+            "progress": round(t.progress, 3),
+            "sunrise": sun.sunrise.isoformat() if sun and sun.sunrise else None,
+            "sunset": sun.sunset.isoformat() if sun and sun.sunset else None,
+            "sunset_offset_minutes": c.settings.sunset_offset,
+            "enabled": c.enabled,
+            "overridden_lights": sorted(c.overridden),
         }
 
 
-class LumaFlowNextTransitionSensor(CoordinatorEntity[LumaFlowCoordinator], SensorEntity):
-    """Sensor for next transition time."""
+class NextTransitionSensor(LumaFlowEntity, SensorEntity):
+    _attr_translation_key = "next_transition"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:clock-outline"
 
-    def __init__(
-        self,
-        coordinator: LumaFlowCoordinator,
-        config_entry: ConfigEntry,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._config_entry = config_entry
-        self._group_name = coordinator.group_name
-        self._attr_unique_id = f"{config_entry.entry_id}_{SENSOR_NEXT_TRANSITION}"
-        self._attr_name = f"LumaFlow {self._group_name.title()} Next Transition"
-        self._attr_icon = "mdi:clock-outline"
-        self._attr_device_class = "timestamp"
+    def __init__(self, controller: LumaFlowController) -> None:
+        super().__init__(controller, "next_transition")
 
     @property
-    def native_value(self) -> Optional[datetime]:
-        """Return the next transition time."""
-        if not self.coordinator.data:
-            return None
-        
-        data = self.coordinator.data
-        current_phase = data.get("current_phase")
-        sun_times = data.get("sun_times", {})
-        sunset_adjusted = data.get("sunset_adjusted")
-        
-        if not current_phase or not sun_times:
-            return None
-        
-        # Calculate next transition based on current phase
-        if current_phase == PHASE_DAY:
-            return sunset_adjusted
-        elif current_phase == PHASE_SUNSET:
-            return sunset_adjusted + timedelta(hours=1)  # End of sunset phase
-        elif current_phase == PHASE_EVENING:
-            return sunset_adjusted + timedelta(hours=4)  # End of evening phase
-        elif current_phase == PHASE_NIGHT:
-            return sun_times.get("sunrise")
-        elif current_phase == PHASE_SUNRISE:
-            return sunset_adjusted  # Next sunset
-        
-        return None
+    def native_value(self) -> datetime | None:
+        return self.controller.target.next_change if self.controller.target else None
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
-        """Return extra state attributes."""
-        if not self.coordinator.data:
-            return {}
-        
-        data = self.coordinator.data
-        sun_times = data.get("sun_times", {})
-        
-        attributes = {}
-        if sun_times:
-            attributes.update({
-                "sunrise": sun_times.get("sunrise"),
-                "sunset": sun_times.get("sunset"),
-                "sunset_adjusted": data.get("sunset_adjusted"),
-            })
-        
-        return attributes
-
-    @property
-    def device_info(self) -> Dict[str, Any]:
-        """Return device information."""
-        return {
-            "identifiers": {(DOMAIN, f"{self._config_entry.entry_id}_{self._group_name}")},
-            "name": f"LumaFlow {self._group_name.title()}",
-            "manufacturer": "LumaFlow",
-            "entry_type": "service",
-        } 
+    def extra_state_attributes(self) -> dict[str, Any]:
+        t = self.controller.target
+        return {"next_phase": t.next_phase} if t else {}

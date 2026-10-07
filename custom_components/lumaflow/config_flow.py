@@ -1,288 +1,121 @@
-"""Config flow for LumaFlow integration."""
+"""Setup in three steps (lights, timing, advanced) and an options flow to change any of it later."""
+from __future__ import annotations
 
-import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 import voluptuous as vol
-from homeassistant import config_entries
+
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_NAME
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
-    CONF_LIGHTS,
-    CONF_GROUP_NAME,
-    CONF_SUNSET_OFFSET,
-    CONF_TRANSITION_SPEED,
-    CONF_MIN_BRIGHTNESS,
-    CONF_MAX_BRIGHTNESS,
-    CONF_MIN_COLOR_TEMP,
-    CONF_MAX_COLOR_TEMP,
-    CONF_ENABLE_OVERRIDE_DETECTION,
-    CONF_RESTORE_ON_STARTUP,
-    DEFAULT_SUNSET_OFFSET,
-    DEFAULT_TRANSITION_SPEED,
-    DEFAULT_MIN_BRIGHTNESS,
-    DEFAULT_MAX_BRIGHTNESS,
-    DEFAULT_MIN_COLOR_TEMP,
-    DEFAULT_MAX_COLOR_TEMP,
-    DEFAULT_ENABLE_OVERRIDE_DETECTION,
-    DEFAULT_RESTORE_ON_STARTUP,
-    DOMAIN,
-    NAME,
+    CONF_ENABLE_OVERRIDE_DETECTION, CONF_LIGHTS, CONF_MAX_BRIGHTNESS, CONF_MAX_COLOR_TEMP, CONF_MIN_BRIGHTNESS,
+    CONF_MIN_COLOR_TEMP, CONF_RESTORE_ON_STARTUP, CONF_SUNSET_OFFSET, CONF_TRANSITION_SPEED, DEFAULTS, DOMAIN, NAME,
+    TRANSITION_SPEEDS,
 )
 
-_LOGGER = logging.getLogger(__name__)
+
+def _lights_schema(values: dict[str, Any], with_name: bool) -> vol.Schema:
+    fields: dict[Any, Any] = {}
+    if with_name:
+        fields[vol.Required(CONF_NAME, default=values.get(CONF_NAME, NAME))] = str
+    fields[vol.Required(CONF_LIGHTS, default=values.get(CONF_LIGHTS, []))] = selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="light", multiple=True))
+    return vol.Schema(fields)
 
 
-class LumaFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for LumaFlow."""
+def _timing_schema(v: dict[str, Any]) -> vol.Schema:
+    pct = selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=100, step=1, unit_of_measurement="%",
+                                                                mode=selector.NumberSelectorMode.SLIDER))
+    kelvin = selector.NumberSelector(selector.NumberSelectorConfig(min=2000, max=6500, step=50, unit_of_measurement="K",
+                                                                   mode=selector.NumberSelectorMode.BOX))
+    return vol.Schema({
+        vol.Required(CONF_SUNSET_OFFSET, default=v[CONF_SUNSET_OFFSET]): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=-120, max=120, step=5, unit_of_measurement="min",
+                                          mode=selector.NumberSelectorMode.BOX)),
+        vol.Required(CONF_TRANSITION_SPEED, default=v[CONF_TRANSITION_SPEED]): selector.SelectSelector(
+            selector.SelectSelectorConfig(options=list(TRANSITION_SPEEDS), translation_key="transition_speed")),
+        vol.Required(CONF_MIN_BRIGHTNESS, default=v[CONF_MIN_BRIGHTNESS]): pct,
+        vol.Required(CONF_MAX_BRIGHTNESS, default=v[CONF_MAX_BRIGHTNESS]): pct,
+        vol.Required(CONF_MIN_COLOR_TEMP, default=v[CONF_MIN_COLOR_TEMP]): kelvin,
+        vol.Required(CONF_MAX_COLOR_TEMP, default=v[CONF_MAX_COLOR_TEMP]): kelvin,
+    })
 
+
+def _advanced_schema(v: dict[str, Any]) -> vol.Schema:
+    return vol.Schema({
+        vol.Required(CONF_ENABLE_OVERRIDE_DETECTION, default=v[CONF_ENABLE_OVERRIDE_DETECTION]): bool,
+        vol.Required(CONF_RESTORE_ON_STARTUP, default=v[CONF_RESTORE_ON_STARTUP]): bool,
+    })
+
+
+def _check_timing(user_input: dict[str, Any]) -> dict[str, str]:
+    errors = {}
+    if user_input[CONF_MIN_BRIGHTNESS] > user_input[CONF_MAX_BRIGHTNESS]:
+        errors[CONF_MIN_BRIGHTNESS] = "min_above_max"
+    if user_input[CONF_MIN_COLOR_TEMP] >= user_input[CONF_MAX_COLOR_TEMP]:
+        errors[CONF_MIN_COLOR_TEMP] = "min_above_max"
+    return errors
+
+
+def _ints(user_input: dict[str, Any]) -> dict[str, Any]:
+    return {k: int(v) if isinstance(v, float) else v for k, v in user_input.items()}
+
+
+class LumaFlowConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self) -> None:
-        """Initialize the config flow."""
-        self._data: Dict[str, Any] = {}
+        self._data: dict[str, Any] = {}
 
-    async def async_step_user(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Handle the initial step - create light group."""
-        errors: Dict[str, str] = {}
-
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            # Validate input
-            group_name = user_input.get(CONF_GROUP_NAME, "").strip()
-            lights = user_input.get(CONF_LIGHTS, [])
-            
-            if not group_name:
-                errors["base"] = "no_group_name"
-            elif not lights:
-                errors["base"] = "no_lights_selected"
+            if not user_input[CONF_LIGHTS]:
+                errors[CONF_LIGHTS] = "no_lights"
             else:
-                # Check if group name would create duplicate entity
-                entity_id = f"light.{group_name.lower().replace(' ', '_')}_lumaflow"
-                if entity_id in self.hass.states.async_entity_ids("light"):
-                    errors["base"] = "group_name_exists"
-                else:
-                    # Store data and move to timing configuration
-                    self._data.update(user_input)
-                    return await self.async_step_timing()
+                self._data.update(user_input)
+                return await self.async_step_timing()
+        return self.async_show_form(step_id="user", data_schema=_lights_schema(self._data, True), errors=errors)
 
-        # Get available lights
-        light_entities = await self._get_light_entities()
-        
-        if not light_entities:
-            return self.async_abort(reason="no_lights_found")
-
-        data_schema = vol.Schema({
-            vol.Required(CONF_GROUP_NAME): str,
-            vol.Required(CONF_LIGHTS): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="light",
-                    multiple=True,
-                )
-            ),
-        })
-
-        return self.async_show_form(
-            step_id="user",
-            data_schema=data_schema,
-            errors=errors,
-            description_placeholders={
-                "light_count": str(len(light_entities))
-            }
-        )
-
-    async def async_step_timing(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Handle timing configuration step."""
-        errors: Dict[str, str] = {}
-
+    async def async_step_timing(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            # Validate timing settings
-            if user_input[CONF_MIN_BRIGHTNESS] >= user_input[CONF_MAX_BRIGHTNESS]:
-                errors["base"] = "invalid_brightness_range"
-            elif user_input[CONF_MIN_COLOR_TEMP] >= user_input[CONF_MAX_COLOR_TEMP]:
-                errors["base"] = "invalid_color_temp_range"
-            else:
-                # Store timing settings and move to advanced options
+            user_input = _ints(user_input)
+            errors = _check_timing(user_input)
+            if not errors:
                 self._data.update(user_input)
                 return await self.async_step_advanced()
+        return self.async_show_form(step_id="timing", data_schema=_timing_schema({**DEFAULTS, **self._data}), errors=errors)
 
-        data_schema = vol.Schema({
-            vol.Required(
-                CONF_SUNSET_OFFSET, default=DEFAULT_SUNSET_OFFSET
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-120,
-                    max=120,
-                    step=5,
-                    unit_of_measurement="minutes",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Required(
-                CONF_TRANSITION_SPEED, default=DEFAULT_TRANSITION_SPEED
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=["slow", "moderate", "fast"],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            ),
-            vol.Required(
-                CONF_MIN_BRIGHTNESS, default=DEFAULT_MIN_BRIGHTNESS
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1,
-                    max=100,
-                    step=1,
-                    unit_of_measurement="%",
-                    mode=selector.NumberSelectorMode.SLIDER,
-                )
-            ),
-            vol.Required(
-                CONF_MAX_BRIGHTNESS, default=DEFAULT_MAX_BRIGHTNESS
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1,
-                    max=100,
-                    step=1,
-                    unit_of_measurement="%",
-                    mode=selector.NumberSelectorMode.SLIDER,
-                )
-            ),
-            vol.Required(
-                CONF_MIN_COLOR_TEMP, default=DEFAULT_MIN_COLOR_TEMP
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=2000,
-                    max=6500,
-                    step=100,
-                    unit_of_measurement="K",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Required(
-                CONF_MAX_COLOR_TEMP, default=DEFAULT_MAX_COLOR_TEMP
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=2000,
-                    max=6500,
-                    step=100,
-                    unit_of_measurement="K",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-        })
-
-        return self.async_show_form(
-            step_id="timing",
-            data_schema=data_schema,
-            errors=errors,
-        )
-
-    async def async_step_advanced(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Handle advanced options step."""
+    async def async_step_advanced(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             self._data.update(user_input)
-            
-            # Create the config entry with group name as title
-            group_name = self._data.get(CONF_GROUP_NAME, "LumaFlow Group")
-            return self.async_create_entry(
-                title=f"LumaFlow - {group_name}",
-                data=self._data,
-            )
-
-        data_schema = vol.Schema({
-            vol.Required(
-                CONF_ENABLE_OVERRIDE_DETECTION, default=DEFAULT_ENABLE_OVERRIDE_DETECTION
-            ): selector.BooleanSelector(),
-            vol.Required(
-                CONF_RESTORE_ON_STARTUP, default=DEFAULT_RESTORE_ON_STARTUP
-            ): selector.BooleanSelector(),
-        })
-
-        return self.async_show_form(
-            step_id="advanced",
-            data_schema=data_schema,
-        )
-
-    async def _get_light_entities(self) -> list[str]:
-        """Get available light entities."""
-        entities = []
-        
-        for state in self.hass.states.async_all("light"):
-            # Filter for colored lights or lights with color temperature support
-            supported_color_modes = state.attributes.get("supported_color_modes", [])
-            if any(mode in supported_color_modes for mode in ["rgb", "rgbw", "color_temp"]):
-                entities.append(state.entity_id)
-        
-        return sorted(entities)
+            name = self._data.pop(CONF_NAME, NAME) or NAME
+            return self.async_create_entry(title=name, data=self._data)
+        return self.async_show_form(step_id="advanced", data_schema=_advanced_schema({**DEFAULTS, **self._data}))
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> "LumaFlowOptionsFlow":
-        """Get the options flow for this handler."""
-        return LumaFlowOptionsFlow(config_entry)
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        return LumaFlowOptionsFlow()
 
 
-class LumaFlowOptionsFlow(config_entries.OptionsFlow):
-    """Handle options for LumaFlow."""
+class LumaFlowOptionsFlow(OptionsFlow):
+    """Everything from setup can be changed later; the entry reloads to apply it."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
-
-    async def async_step_init(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Manage the options."""
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        current = {**DEFAULTS, **self.config_entry.data, **self.config_entry.options}
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
-        data_schema = vol.Schema({
-            vol.Required(
-                CONF_SUNSET_OFFSET,
-                default=self.config_entry.options.get(
-                    CONF_SUNSET_OFFSET,
-                    self.config_entry.data.get(CONF_SUNSET_OFFSET, DEFAULT_SUNSET_OFFSET)
-                )
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-120,
-                    max=120,
-                    step=5,
-                    unit_of_measurement="minutes",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Required(
-                CONF_TRANSITION_SPEED,
-                default=self.config_entry.options.get(
-                    CONF_TRANSITION_SPEED,
-                    self.config_entry.data.get(CONF_TRANSITION_SPEED, DEFAULT_TRANSITION_SPEED)
-                )
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=["slow", "moderate", "fast"],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            ),
-            vol.Required(
-                CONF_ENABLE_OVERRIDE_DETECTION,
-                default=self.config_entry.options.get(
-                    CONF_ENABLE_OVERRIDE_DETECTION,
-                    self.config_entry.data.get(CONF_ENABLE_OVERRIDE_DETECTION, DEFAULT_ENABLE_OVERRIDE_DETECTION)
-                )
-            ): selector.BooleanSelector(),
-        })
-
-        return self.async_show_form(
-            step_id="init",
-            data_schema=data_schema,
-        ) 
+            user_input = _ints(user_input)
+            errors = _check_timing(user_input)
+            if not user_input[CONF_LIGHTS]:
+                errors[CONF_LIGHTS] = "no_lights"
+            if not errors:
+                return self.async_create_entry(title="", data=user_input)
+        schema = vol.Schema({**_lights_schema(current, False).schema, **_timing_schema(current).schema,
+                             **_advanced_schema(current).schema})
+        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)

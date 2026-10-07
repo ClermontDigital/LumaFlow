@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Choose your lights",
+        "description": "LumaFlow only adjusts these lights while they're on. It never turns a light on or off. Light groups work too: each light in the group is adjusted on its own.",
+        "data": {"name": "Name", "lights": "Lights"}
+      },
+      "timing": {
+        "title": "Timing and ranges",
+        "description": "From sunset (plus the offset) lights dim and warm over four hours to the night values, and they come back up over an hour after sunrise.",
+        "data": {
+          "sunset_offset": "Sunset offset",
+          "transition_speed": "Transition speed",
+          "min_brightness": "Night brightness",
+          "max_brightness": "Day brightness",
+          "min_color_temp": "Night colour temperature (warmest)",
+          "max_color_temp": "Day colour temperature (coolest)"
+        },
+        "data_description": {
+          "sunset_offset": "Start winding down this many minutes before (negative) or after sunset.",
+          "transition_speed": "How long each adjustment fades over: slow 5 min, moderate 3 min, fast 1 min."
+        }
+      },
+      "advanced": {
+        "title": "Advanced",
+        "data": {
+          "enable_override_detection": "Leave a light alone after it's changed by hand",
+          "restore_on_startup": "Put lights back on the curve when Home Assistant starts"
+        },
+        "data_description": {
+          "enable_override_detection": "Until it's switched off and on again, restored with lumaflow.restore_lights, or midnight passes."
+        }
+      }
+    },
+    "error": {
+      "no_lights": "Choose at least one light.",
+      "min_above_max": "The night value must be below the day value."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "LumaFlow settings",
+        "data": {
+          "lights": "Lights",
+          "sunset_offset": "Sunset offset",
+          "transition_speed": "Transition speed",
+          "min_brightness": "Night brightness",
+          "max_brightness": "Day brightness",
+          "min_color_temp": "Night colour temperature (warmest)",
+          "max_color_temp": "Day colour temperature (coolest)",
+          "enable_override_detection": "Leave a light alone after it's changed by hand",
+          "restore_on_startup": "Put lights back on the curve when Home Assistant starts"
+        }
+      }
+    },
+    "error": {
+      "no_lights": "Choose at least one light.",
+      "min_above_max": "The night value must be below the day value."
+    }
+  },
+  "selector": {
+    "transition_speed": {"options": {"slow": "Slow (5 minutes)", "moderate": "Moderate (3 minutes)", "fast": "Fast (1 minute)"}}
+  },
+  "entity": {
+    "sensor": {
+      "current_phase": {
+        "name": "Current phase",
+        "state": {"sunrise": "Sunrise", "day": "Day", "sunset": "Sunset", "evening": "Evening", "night": "Night"}
+      },
+      "next_transition": {"name": "Next transition"}
+    }
+  },
+  "services": {
+    "enable": {"name": "Enable", "description": "Turn circadian lighting on for every LumaFlow entry."},
+    "disable": {"name": "Disable", "description": "Stop adjusting lights. Settings are kept."},
+    "restore_lights": {
+      "name": "Restore lights",
+      "description": "Clear manual overrides and put lights straight back on the curve.",
+      "fields": {"lights": {"name": "Lights", "description": "Only these lights. Leave empty for all of them."}}
+    },
+    "override_lights": {
+      "name": "Override lights",
+      "description": "Set lights to your own values; LumaFlow leaves them alone until they're restored, switched off and on, or midnight.",
+      "fields": {
+        "lights": {"name": "Lights", "description": "The lights to set."},
+        "brightness": {"name": "Brightness", "description": "Brightness in percent."},
+        "color_temp": {"name": "Colour temperature", "description": "In Kelvin."},
+        "rgb_color": {"name": "RGB colour", "description": "Red, green and blue, 0 to 255 each."}
+      }
+    }
+  }
+}
