@@ -1,5 +1,5 @@
 """LumaFlow against fake lights: which lights it commands, overrides, groups, services and setup."""
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from freezegun.api import FrozenDateTimeFactory
 import pytest
@@ -8,6 +8,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry, async_
 from custom_components.lumaflow.const import DOMAIN
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.util import dt as dt_util
 
 CT = {"supported_color_modes": ["color_temp"], "color_mode": "color_temp", "min_color_temp_kelvin": 3000,
@@ -147,3 +148,87 @@ async def test_config_flow_three_steps(hass, lights):
     r = await hass.config_entries.flow.async_configure(r["flow_id"], {"enable_override_detection": True, "restore_on_startup": False})
     assert r["type"] == "create_entry" and r["title"] == "Bedroom"
     assert r["data"]["lights"] == ["light.ct"] and r["data"]["max_color_temp"] == 5000
+
+
+def _sunset(hass) -> datetime:
+    return dt_util.as_local(get_astral_event_date(hass, "sunset", datetime(2026, 10, 10).date()))
+
+
+def _call_for(calls, entity_id):
+    return next(c for c in reversed(calls) if entity_id in (c.data["entity_id"] if isinstance(c.data["entity_id"], list) else [c.data["entity_id"]]))
+
+
+async def _tick(hass, freezer, minutes):
+    freezer.tick(timedelta(minutes=minutes))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+
+async def test_fade_on_to_a_set_level_before_sunset(hass, freezer):
+    sunset = _sunset(hass)
+    freezer.move_to(sunset - timedelta(minutes=30))
+    hass.states.async_set("light.rgb_off", "off", RGB)
+    hass.states.async_set("light.ct_off", "off", CT)
+    hass.states.async_set("light.already_on", "on", RGB)
+    calls = async_mock_service(hass, "light", "turn_on")
+    await _setup(hass, ["light.rgb_off", "light.ct_off", "light.already_on"], mode="fade_in",
+                 fade_in_minutes=60, fade_in_brightness=50, fade_in_color="white")
+    sent = _sent(calls)
+    assert set(sent) == {"light.rgb_off", "light.ct_off"}          # the one already on is left alone
+    assert sent["light.rgb_off"]["brightness_pct"] == 25           # halfway through the hour
+    assert tuple(sent["light.rgb_off"]["rgb_color"]) == (255, 255, 255)
+    assert sent["light.ct_off"]["color_temp_kelvin"] == 4000 and "transition" not in sent["light.ct_off"]
+    sw = hass.states.get("switch.lumaflow").attributes
+    assert sw["mode"] == "fade_in" and sw["fading_lights"] == ["light.ct_off", "light.rgb_off"]
+
+    # The bulbs come on with what LumaFlow asked for: that's not a manual change.
+    for e, attrs in (("light.rgb_off", RGB), ("light.ct_off", CT)):
+        hass.states.async_set(e, "on", {**attrs, "brightness": 64}, context=_call_for(calls, e).context)
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["overridden_lights"] == []
+
+    calls.clear()
+    await _tick(hass, freezer, 15)
+    assert 34 <= _sent(calls)["light.rgb_off"]["brightness_pct"] <= 39
+
+    # Someone switches one off mid-fade: it stays off for the night.
+    hass.states.async_set("light.rgb_off", "off", RGB, context=Context())
+    await hass.async_block_till_done()
+    calls.clear()
+    await _tick(hass, freezer, 10)
+    assert "light.rgb_off" not in _sent(calls)
+
+    # At sunset the fade finishes on the set level, and then LumaFlow leaves the lights alone.
+    calls.clear()
+    await _tick(hass, freezer, 10)
+    assert _sent(calls)["light.ct_off"]["brightness_pct"] == 50
+    assert hass.states.get("switch.lumaflow").attributes["fading_lights"] == []
+    calls.clear()
+    await _tick(hass, freezer, 120)
+    assert not calls
+
+
+async def test_set_level_mode_does_nothing_outside_the_fade(hass, lights):
+    await _setup(hass, ["light.ct", "light.off"], mode="fade_in")
+    assert not lights   # 21:00, after sunset: on lights aren't dimmed and off lights stay off
+
+
+async def test_circadian_with_fade_in_comes_up_to_the_curve(hass, freezer):
+    sunset = _sunset(hass)
+    freezer.move_to(sunset - timedelta(minutes=30))
+    hass.states.async_set("light.ct_off", "off", CT)
+    calls = async_mock_service(hass, "light", "turn_on")
+    await _setup(hass, ["light.ct_off"], fade_in=True, fade_in_minutes=60)
+    sent = _sent(calls)["light.ct_off"]
+    assert sent["brightness_pct"] == 50 and sent["color_temp_kelvin"] == 6000   # half of the day value, bulb's max K
+
+
+async def test_options_flow_switches_mode(hass, lights):
+    entry = await _setup(hass, ["light.ct"])
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {"lights": ["light.ct"], "mode": "fade_in"})
+    assert r["step_id"] == "settings" and "fade_in_brightness" in str(r["data_schema"].schema)
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {
+        "sunset_offset": 0, "fade_in_minutes": 60, "fade_in_brightness": 50, "fade_in_color": "white",
+        "enable_override_detection": True, "restore_on_startup": True})
+    assert r["type"] == "create_entry" and entry.options["mode"] == "fade_in" and entry.options["fade_in_brightness"] == 50

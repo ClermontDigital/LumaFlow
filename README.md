@@ -2,9 +2,10 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/ClermontDigital/LumaFlow/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/ClermontDigital/LumaFlow/releases)
 
-LumaFlow automatically adjusts your smart lights to follow natural circadian rhythms. It takes
+LumaFlow automatically adjusts your smart lights to follow natural circadian rhythms, and can switch
+them on before sunset so the house is lit by the time it's dark. It takes
 sunrise and sunset from your Home Assistant location, keeps lights bright and cool through the day,
 and dims and warms them through the evening. That supports your natural sleep-wake cycle without
 you touching a thing.
@@ -12,6 +13,13 @@ you touching a thing.
 > **1.0.0 is a rewrite.** Earlier versions didn't set up on current Home Assistant releases, and put
 > lights on full daylight after midnight. If you tried LumaFlow before and it didn't work, this
 > version is worth another go. Existing setups carry over. See the [changelog](#changelog).
+
+## Two ways to use it
+
+| Mode | What it does |
+|---|---|
+| **Follow the circadian rhythm** | Lights that are on stay bright and cool through the day, then dim and warm through the evening. You can also have them turn on before sunset and fade up to the curve. |
+| **Fade on to a set level before sunset** | From an hour (adjustable) before sunset, lights that are off switch on at 1% and brighten to a set level, 50% white by default, by sunset. After that LumaFlow leaves them alone: no colour changes, no dimming. |
 
 ## Core Capabilities
 
@@ -22,7 +30,8 @@ you touching a thing.
 - **Configurable timing**: a sunset offset from -120 to +120 minutes
 
 ### 🏠 **Intelligent Light Management**
-- **Selective control**: only lights that are already on are adjusted. LumaFlow never turns a light on or off
+- **Selective control**: only lights that are already on are adjusted, and LumaFlow never turns a light off
+- **Fade on before sunset** (optional): lights that are off switch on at 1% and brighten so they're fully on by sunset. This happens once per evening per light, and one you turn off stays off
 - **Immediate adaptation**: when a light is turned on, it adopts the current values within about a second
 - **Universal compatibility**: colour temperature lights, RGB lights (warm white is mixed from RGB) and brightness-only lights
 - **Brand agnostic**: anything Home Assistant can dim works, including Hue, LIFX, Shelly, WLED, ESPHome, Tuya and Zigbee bulbs
@@ -85,8 +94,23 @@ sunrise ─1 h─▶  day  ───────────▶ sunset+offset �
 From sunset + offset, brightness and colour temperature fall in a straight line over the four
 hours to the night values. With a late summer sunset, that wind-down carries on past midnight.
 
+### 🌇 **Fade on before sunset**
+
+Switch it on with the **Fade on to a set level** mode, or with **Also turn lights on before sunset** in
+the circadian mode.
+
+- The fade starts at *sunset + offset − fade-in length* (60 minutes by default) and ends at *sunset + offset*.
+- Lights that are **off** when it starts switch on at 1%, then brighten a little every minute, so they're
+  fully on at sunset:
+  - in **set-level mode**, up to the brightness you choose (default 50%), in white or in each light's own colour
+  - in **circadian mode**, up to the curve's value, and from then on they follow the curve as usual
+- Lights that are **already on** aren't touched by the fade.
+- **Once per evening**: turn a light off during or after the fade and it stays off. Adjust one mid-fade and
+  LumaFlow stops fading it.
+- In set-level mode, LumaFlow does nothing else: lights you switch on at other times are left as they are.
+
 ### ⚡ **Smart Activation**
-- **Selective control**: only lights that are on are adjusted
+- **Selective control**: only lights that are on are adjusted (apart from the optional fade-in)
 - **Instant adaptation**: a light that's turned on takes the current values straight away
 - **Respects manual control**: lights you turn off stay off, and lights you adjust stay as you set them
 - **Daily override reset**: manual adjustments clear at midnight
@@ -135,7 +159,8 @@ LumaFlow follows the principles used in circadian lighting research:
 
 ### Initial Setup
 
-1. **Choose lights**: the lights (or light groups) LumaFlow should adjust. Any dimmable light can be
+1. **Choose lights and a mode**: the lights (or light groups) LumaFlow should handle, and whether they
+   **follow the circadian rhythm** or **fade on to a set level before sunset**. Any dimmable light can be
    chosen. Lights that can only switch on and off are ignored.
 
 2. **Timing and ranges**:
@@ -143,6 +168,9 @@ LumaFlow follows the principles used in circadian lighting research:
    - **Transition speed**: how long each adjustment fades over (slow 5 min, moderate 3 min, fast 1 min)
    - **Night and day brightness**: from 1 to 100%
    - **Night and day colour temperature**: from 2000 to 6500 K. Each light is kept within its own range.
+   - **Fade-in length**: how long before sunset the lights start coming on (5–180 minutes, default 60)
+   - **Also turn lights on before sunset** (circadian mode), or **Brightness at sunset** and **Colour**
+     (set-level mode: default 50%, white)
 
 3. **Advanced**:
    - **Leave a light alone after it's changed by hand** (override detection)
@@ -198,8 +226,8 @@ data:
 
 The names below are for an entry called "LumaFlow". A second entry gets its own name.
 
-- **Switch** `switch.lumaflow`: enable or disable. Its attributes list the controlled lights,
-  which are on, and which are overridden.
+- **Switch** `switch.lumaflow`: enable or disable. Its attributes give the mode, the controlled lights,
+  which are on, which are overridden, which are fading on (`fading_lights`), and today's fade-in window.
 - **Sensor** `sensor.lumaflow_current_phase`: `sunrise`, `day`, `sunset`, `evening` or `night`.
   Its attributes include the target brightness and colour temperature, today's sunrise and sunset,
   and the overridden lights.
@@ -207,6 +235,20 @@ The names below are for an entry called "LumaFlow". A second entry gets its own 
   `next_phase` attribute.
 
 ## Automation Examples
+
+### Working with "reset the bulb on power-on" automations
+
+Some setups have an automation that puts bulbs back to a default (say 50% white) whenever they're
+switched on. During the fade-in, that would jump the light straight to its default. The switch's
+`fading_lights` attribute lists the lights LumaFlow is fading on, so the automation can skip them:
+
+```yaml
+conditions:
+  - condition: template
+    value_template: "{{ trigger.entity_id not in (state_attr('switch.lumaflow', 'fading_lights') or []) }}"
+```
+
+LumaFlow updates `fading_lights` before it sends the command that switches the light on.
 
 ### Enable with Motion Detection
 
@@ -318,6 +360,16 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements_test.txt
 - **Time-limited overrides**
 
 ## Changelog
+
+### Version 1.1.0
+- **Fade on before sunset.** Lights that are off come on at 1% before sunset and brighten so
+  they're fully on by sunset. The start is set by the fade-in length, 60 minutes by default.
+- **A new mode: Fade on to a set level.** The fade-in ends at a set brightness (50% by default) in
+  white or each light's own colour, and LumaFlow otherwise leaves the lights alone. The circadian
+  mode can use the fade-in too, ending on the curve's values.
+- The switch publishes `fading_lights`, so "reset the bulb on power-on" automations can skip a
+  light while it's fading on.
+- The options flow asks for the mode first, then shows that mode's settings.
 
 ### Version 1.0.0
 - **Rewritten from the ground up** to do what this README describes. Existing entries keep their

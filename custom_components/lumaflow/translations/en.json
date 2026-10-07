@@ -3,23 +3,38 @@
     "step": {
       "user": {
         "title": "Choose your lights",
-        "description": "LumaFlow only adjusts these lights while they're on. It never turns a light on or off. Light groups work too: each light in the group is adjusted on its own.",
-        "data": {"name": "Name", "lights": "Lights"}
+        "description": "Choose the lights, and whether they follow the circadian rhythm all day and night, or simply fade on to a set level before sunset. Light groups work too: each light in the group is handled on its own.",
+        "data": {
+          "name": "Name",
+          "lights": "Lights",
+          "mode": "What should LumaFlow do?"
+        },
+        "data_description": {
+          "mode": "Follow the circadian rhythm: lights that are on dim and warm through the evening. Fade on before sunset: lights switch on and brighten to a set level by sunset, and are otherwise left alone."
+        }
       },
       "timing": {
         "title": "Timing and ranges",
-        "description": "From sunset (plus the offset) lights dim and warm over four hours to the night values, and they come back up over an hour after sunrise.",
+        "description": "Fade-in: lights come on before sunset and are fully on by sunset. Circadian: from sunset (plus the offset) lights dim and warm over four hours to the night values, and come back up over an hour after sunrise.",
         "data": {
           "sunset_offset": "Sunset offset",
           "transition_speed": "Transition speed",
           "min_brightness": "Night brightness",
           "max_brightness": "Day brightness",
           "min_color_temp": "Night colour temperature (warmest)",
-          "max_color_temp": "Day colour temperature (coolest)"
+          "max_color_temp": "Day colour temperature (coolest)",
+          "fade_in": "Also turn lights on before sunset",
+          "fade_in_minutes": "Fade-in length",
+          "fade_in_brightness": "Brightness at sunset",
+          "fade_in_color": "Colour"
         },
         "data_description": {
-          "sunset_offset": "Start winding down this many minutes before (negative) or after sunset.",
-          "transition_speed": "How long each adjustment fades over: slow 5 min, moderate 3 min, fast 1 min."
+          "sunset_offset": "Shift sunset earlier (negative) or later. The fade ends, and the evening wind-down starts, at this time.",
+          "transition_speed": "How long each adjustment fades over: slow 5 min, moderate 3 min, fast 1 min.",
+          "fade_in": "Lights that are off switch on at 1% and brighten to the curve's values by sunset. Once per evening; one you turn off stays off.",
+          "fade_in_minutes": "How long before sunset (plus the offset) the fade starts. The lights are fully on at sunset.",
+          "fade_in_brightness": "Where the fade ends. After that LumaFlow leaves the lights alone.",
+          "fade_in_color": "White, or keep whatever colour each light was last set to."
         }
       },
       "advanced": {
@@ -41,9 +56,15 @@
   "options": {
     "step": {
       "init": {
-        "title": "LumaFlow settings",
+        "title": "LumaFlow: lights and mode",
         "data": {
           "lights": "Lights",
+          "mode": "What should LumaFlow do?"
+        }
+      },
+      "settings": {
+        "title": "LumaFlow settings",
+        "data": {
           "sunset_offset": "Sunset offset",
           "transition_speed": "Transition speed",
           "min_brightness": "Night brightness",
@@ -51,7 +72,18 @@
           "min_color_temp": "Night colour temperature (warmest)",
           "max_color_temp": "Day colour temperature (coolest)",
           "enable_override_detection": "Leave a light alone after it's changed by hand",
-          "restore_on_startup": "Put lights back on the curve when Home Assistant starts"
+          "restore_on_startup": "Put lights back on the curve when Home Assistant starts",
+          "fade_in": "Also turn lights on before sunset",
+          "fade_in_minutes": "Fade-in length",
+          "fade_in_brightness": "Brightness at sunset",
+          "fade_in_color": "Colour"
+        },
+        "data_description": {
+          "fade_in": "Lights that are off switch on at 1% and brighten to the curve's values by sunset. Once per evening; one you turn off stays off.",
+          "fade_in_minutes": "How long before sunset (plus the offset) the fade starts. The lights are fully on at sunset.",
+          "fade_in_brightness": "Where the fade ends. After that LumaFlow leaves the lights alone.",
+          "fade_in_color": "White, or keep whatever colour each light was last set to.",
+          "sunset_offset": "Shift sunset earlier (negative) or later. The fade ends, and the evening wind-down starts, at this time."
         }
       }
     },
@@ -61,33 +93,82 @@
     }
   },
   "selector": {
-    "transition_speed": {"options": {"slow": "Slow (5 minutes)", "moderate": "Moderate (3 minutes)", "fast": "Fast (1 minute)"}}
+    "transition_speed": {
+      "options": {
+        "slow": "Slow (5 minutes)",
+        "moderate": "Moderate (3 minutes)",
+        "fast": "Fast (1 minute)"
+      }
+    },
+    "mode": {
+      "options": {
+        "circadian": "Follow the circadian rhythm",
+        "fade_in": "Fade on to a set level before sunset"
+      }
+    },
+    "fade_in_color": {
+      "options": {
+        "white": "White",
+        "keep": "Keep each light's own colour"
+      }
+    }
   },
   "entity": {
     "sensor": {
       "current_phase": {
         "name": "Current phase",
-        "state": {"sunrise": "Sunrise", "day": "Day", "sunset": "Sunset", "evening": "Evening", "night": "Night"}
+        "state": {
+          "sunrise": "Sunrise",
+          "day": "Day",
+          "sunset": "Sunset",
+          "evening": "Evening",
+          "night": "Night"
+        }
       },
-      "next_transition": {"name": "Next transition"}
+      "next_transition": {
+        "name": "Next transition"
+      }
     }
   },
   "services": {
-    "enable": {"name": "Enable", "description": "Turn circadian lighting on for every LumaFlow entry."},
-    "disable": {"name": "Disable", "description": "Stop adjusting lights. Settings are kept."},
+    "enable": {
+      "name": "Enable",
+      "description": "Turn circadian lighting on for every LumaFlow entry."
+    },
+    "disable": {
+      "name": "Disable",
+      "description": "Stop adjusting lights. Settings are kept."
+    },
     "restore_lights": {
       "name": "Restore lights",
       "description": "Clear manual overrides and put lights straight back on the curve.",
-      "fields": {"lights": {"name": "Lights", "description": "Only these lights. Leave empty for all of them."}}
+      "fields": {
+        "lights": {
+          "name": "Lights",
+          "description": "Only these lights. Leave empty for all of them."
+        }
+      }
     },
     "override_lights": {
       "name": "Override lights",
       "description": "Set lights to your own values; LumaFlow leaves them alone until they're restored, switched off and on, or midnight.",
       "fields": {
-        "lights": {"name": "Lights", "description": "The lights to set."},
-        "brightness": {"name": "Brightness", "description": "Brightness in percent."},
-        "color_temp": {"name": "Colour temperature", "description": "In Kelvin."},
-        "rgb_color": {"name": "RGB colour", "description": "Red, green and blue, 0 to 255 each."}
+        "lights": {
+          "name": "Lights",
+          "description": "The lights to set."
+        },
+        "brightness": {
+          "name": "Brightness",
+          "description": "Brightness in percent."
+        },
+        "color_temp": {
+          "name": "Colour temperature",
+          "description": "In Kelvin."
+        },
+        "rgb_color": {
+          "name": "RGB colour",
+          "description": "Red, green and blue, 0 to 255 each."
+        }
       }
     }
   }

@@ -40,10 +40,17 @@ class LumaFlowSwitch(LumaFlowEntity, SwitchEntity, RestoreEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         c = self.controller
         lights = c.lights()
+        window = c.fade_window()
         return {
+            "mode": c.mode,
             "controlled_lights": lights,
             "lights_on": [e for e in lights if c._is_on(e)],  # noqa: SLF001
             "overridden_lights": sorted(c.overridden),
+            # Lights LumaFlow is fading on right now. An automation that resets bulbs when they're
+            # switched on can skip these: {{ trigger.entity_id in state_attr('switch.lumaflow', 'fading_lights') }}
+            "fading_lights": sorted(c.fading),
+            "fade_in_start": window[0].isoformat() if window else None,
+            "fade_in_end": window[1].isoformat() if window else None,
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:

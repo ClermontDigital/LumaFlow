@@ -1,7 +1,9 @@
 """Drives the configured lights along the circadian curve.
 
 Rules, from the README:
-- Only lights that are already on are touched. LumaFlow never turns a light on or off.
+- Only lights that are already on are touched, and LumaFlow never turns a light off. The one exception
+  is the optional fade-in: before sunset it switches lights that are off on at 1% and brightens them,
+  once per evening per light.
 - A light that's switched on adapts straight away.
 - A manual change (brightness or colour that LumaFlow didn't make) marks that light overridden,
   and LumaFlow leaves it alone until it's switched off and on again, it's restored with
@@ -44,7 +46,12 @@ from homeassistant.util import dt as dt_util
 from . import circadian
 from .const import (
     CONF_ENABLE_OVERRIDE_DETECTION,
+    CONF_FADE_IN,
+    CONF_FADE_IN_BRIGHTNESS,
+    CONF_FADE_IN_COLOR,
+    CONF_FADE_IN_MINUTES,
     CONF_LIGHTS,
+    CONF_MODE,
     CONF_MAX_BRIGHTNESS,
     CONF_MAX_COLOR_TEMP,
     CONF_MIN_BRIGHTNESS,
@@ -53,7 +60,10 @@ from .const import (
     CONF_SUNSET_OFFSET,
     CONF_TRANSITION_SPEED,
     DEFAULTS,
+    FADE_WHITE_KELVIN,
     MIN_STEP_BRIGHTNESS_PCT,
+    MODE_CIRCADIAN,
+    MODE_FADE_IN,
     MIN_STEP_KELVIN,
     OVERRIDE_BRIGHTNESS_PCT,
     OVERRIDE_KELVIN,
@@ -88,6 +98,11 @@ class LumaFlowController:
         self._contexts: deque[str] = deque(maxlen=200)  # ids of our own service calls
         self._unsubs: list = []
         self._unsub_lights = None
+        # Fade-in: lights LumaFlow switched on this evening and is still bringing up, and every
+        # light already considered today (so one turned off by hand stays off).
+        self.fading: set[str] = set()
+        self._fade_day: date | None = None
+        self._fade_handled: set[str] = set()
 
     # Settings ---------------------------------------------------------------------------------
 
@@ -101,6 +116,25 @@ class LumaFlowController:
         low_k, high_k = sorted((int(c[CONF_MIN_COLOR_TEMP]), int(c[CONF_MAX_COLOR_TEMP])))
         low_b, high_b = sorted((int(c[CONF_MIN_BRIGHTNESS]), int(c[CONF_MAX_BRIGHTNESS])))
         return circadian.Settings(int(c[CONF_SUNSET_OFFSET]), low_b, high_b, low_k, high_k)
+
+    @property
+    def mode(self) -> str:
+        return self.config.get(CONF_MODE) or MODE_CIRCADIAN
+
+    @property
+    def follows_curve(self) -> bool:
+        return self.mode == MODE_CIRCADIAN
+
+    @property
+    def fade_enabled(self) -> bool:
+        return self.mode == MODE_FADE_IN or bool(self.config.get(CONF_FADE_IN))
+
+    def fade_window(self) -> tuple[datetime, datetime] | None:
+        """Today's fade-in: from sunset (plus offset) minus the lead time, until sunset (plus offset)."""
+        if not self.fade_enabled or not self.sun or not self.sun.sunset:
+            return None
+        end = self.sun.sunset + timedelta(minutes=int(self.config[CONF_SUNSET_OFFSET]))
+        return end - timedelta(minutes=int(self.config[CONF_FADE_IN_MINUTES])), end
 
     @property
     def configured(self) -> list[str]:
@@ -195,23 +229,44 @@ class LumaFlowController:
         state = self.hass.states.get(entity_id)
         return bool(state and state.state == STATE_ON)
 
-    def _command(self, entity_id: str, target: circadian.Target) -> dict[str, Any] | None:
-        """The light.turn_on data that puts one light on the curve, or None if it can't be dimmed."""
+    def _dimmable(self, entity_id: str) -> bool:
+        state = self.hass.states.get(entity_id)
+        return bool(state and set(state.attributes.get(ATTR_SUPPORTED_COLOR_MODES) or []) & COLOR_MODES_DIMMABLE)
+
+    def _command(self, entity_id: str, brightness: int, kelvin: int | None, white: bool = False) -> dict[str, Any] | None:
+        """light.turn_on data for one light, or None if it can't be dimmed.
+
+        `kelvin` sets a colour temperature (mixed from RGB on colour-only bulbs); `white` sets plain
+        white instead; with neither, the light keeps its own colour.
+        """
         state = self.hass.states.get(entity_id)
         if not state:
             return None
         modes = set(state.attributes.get(ATTR_SUPPORTED_COLOR_MODES) or [])
         if not modes & COLOR_MODES_DIMMABLE:
             return None   # on/off only
-        data: dict[str, Any] = {ATTR_BRIGHTNESS_PCT: target.brightness}
-        if ColorMode.COLOR_TEMP in modes:
+        data: dict[str, Any] = {ATTR_BRIGHTNESS_PCT: max(1, min(100, int(brightness)))}
+        if white and kelvin is None:
+            if modes & COLOR_MODES_RGB:
+                data[ATTR_RGB_COLOR] = (255, 255, 255)
+                return data
+            kelvin = FADE_WHITE_KELVIN
+        if kelvin is not None and ColorMode.COLOR_TEMP in modes:
             low = state.attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN) or 2000
             high = state.attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN) or 6500
-            data[ATTR_COLOR_TEMP_KELVIN] = int(min(high, max(low, target.kelvin)))
-        elif modes & COLOR_MODES_RGB:
-            r, g, b = color_util.color_temperature_to_rgb(target.kelvin)
+            data[ATTR_COLOR_TEMP_KELVIN] = int(min(high, max(low, kelvin)))
+        elif kelvin is not None and modes & COLOR_MODES_RGB:
+            r, g, b = color_util.color_temperature_to_rgb(kelvin)
             data[ATTR_RGB_COLOR] = (round(r), round(g), round(b))
         return data
+
+    def _fade_command(self, entity_id: str, target: circadian.Target, fraction: float) -> dict[str, Any] | None:
+        fraction = min(1.0, max(0.0, fraction))
+        if self.follows_curve:
+            return self._command(entity_id, max(1, round(target.brightness * fraction)), target.kelvin)
+        level = int(self.config[CONF_FADE_IN_BRIGHTNESS])
+        return self._command(entity_id, max(1, round(level * fraction)), None,
+                             white=self.config[CONF_FADE_IN_COLOR] == "white")
 
     def _needs_update(self, entity_id: str, data: dict[str, Any]) -> bool:
         last = self._applied.get(entity_id)
@@ -226,6 +281,7 @@ class LumaFlowController:
         return False
 
     async def _send(self, entity_id: str, data: dict[str, Any], transition: float) -> None:
+        """One light.turn_on, under a context of LumaFlow's own so its result isn't taken for a manual change."""
         state = self.hass.states.get(entity_id)
         features = int(state.attributes.get(ATTR_SUPPORTED_FEATURES) or 0) if state else 0
         call = {ATTR_ENTITY_ID: entity_id, **data}
@@ -240,20 +296,63 @@ class LumaFlowController:
             _LOGGER.warning("LumaFlow couldn't adjust %s", entity_id, exc_info=True)
 
     async def async_apply(self, force: bool = False, only: list[str] | None = None, transition: float | None = None) -> int:
-        """Put every on, non-overridden light on the curve. Returns how many were sent a command."""
+        """Run the fade-in and put every on, non-overridden light on the curve. Returns commands sent."""
         if not self.enabled:
             return 0
         target = self.refresh_target()
         speed = TRANSITION_SPEEDS.get(self.config[CONF_TRANSITION_SPEED], 180)
+        sent = await self._fade_step(target, force)
+        if self.follows_curve:
+            for entity_id in only or self.lights():
+                if entity_id in self.fading or entity_id in self.overridden or not self._is_on(entity_id):
+                    continue
+                data = self._command(entity_id, target.brightness, target.kelvin)
+                if data and (force or self._needs_update(entity_id, data)):
+                    await self._send(entity_id, data, speed if transition is None else transition)
+                    sent += 1
+        self._notify()
+        return sent
+
+    async def _fade_step(self, target: circadian.Target, force: bool = False) -> int:
+        """Before sunset: switch lights that are off on at 1% and bring them up to their level."""
+        window = self.fade_window()
+        if window is None:
+            if self.fading:
+                self.fading.clear()
+            return 0
+        start, end = window
+        now = dt_util.now()
+        if self._fade_day != start.date():
+            self._fade_day, self._fade_handled, self.fading = start.date(), set(), set()
+        if now < start:
+            return 0
         sent = 0
-        for entity_id in only or self.lights():
+        if now < end:
+            fraction = (now - start) / (end - start)
+            for entity_id in self.lights():
+                if entity_id in self._fade_handled:
+                    continue
+                self._fade_handled.add(entity_id)
+                if self._is_on(entity_id) or not self._dimmable(entity_id) or entity_id in self.overridden:
+                    continue   # already on (or can't dim): not ours to fade
+                data = self._fade_command(entity_id, target, fraction)
+                if data:
+                    # Publish it first, so an automation that resets bulbs on power-on can skip it.
+                    self.fading.add(entity_id)
+                    self._notify()
+                    await self._send(entity_id, data, 0)
+                    sent += 1
+        else:
+            fraction = 1.0
+        for entity_id in sorted(self.fading):
             if entity_id in self.overridden or not self._is_on(entity_id):
                 continue
-            data = self._command(entity_id, target)
+            data = self._fade_command(entity_id, target, fraction)
             if data and (force or self._needs_update(entity_id, data)):
-                await self._send(entity_id, data, speed if transition is None else transition)
+                await self._send(entity_id, data, 0)
                 sent += 1
-        self._notify()
+        if now >= end and self.fading:
+            self.fading.clear()   # done: from here they follow the curve, or are left alone
         return sent
 
     # Events -------------------------------------------------------------------------------------
@@ -307,15 +406,21 @@ class LumaFlowController:
         was_on = old is not None and old.state == STATE_ON
         if new.state != STATE_ON:
             self._applied.pop(entity_id, None)
+            if entity_id in self.fading:
+                self.fading.discard(entity_id)   # turned off mid-fade: it stays off tonight
+                self._notify()
             return
         if not was_on:
             # Just switched on: a fresh start, so any override from before is forgotten.
             self.overridden.discard(entity_id)
+            if entity_id in self.fading:
+                return   # LumaFlow's own fade-in switched it on, already at the right level
             self._applied.pop(entity_id, None)
-            if self.enabled:
+            if self.enabled and self.follows_curve:
                 self.hass.async_create_task(self.async_apply(force=True, only=[entity_id], transition=TURN_ON_TRANSITION))
             return
         if (self.enabled and self.config[CONF_ENABLE_OVERRIDE_DETECTION] and entity_id not in self.overridden
+                and (self.follows_curve or entity_id in self.fading)
                 and not self._ours(event) and self._drifted(entity_id, dict(new.attributes))):
             _LOGGER.debug("LumaFlow: %s was changed by hand, leaving it alone", entity_id)
             self.overridden.add(entity_id)
