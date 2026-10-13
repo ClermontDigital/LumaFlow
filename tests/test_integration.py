@@ -248,3 +248,101 @@ async def test_loading_while_home_assistant_starts(hass, lights, caplog):
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert "Unable to remove" not in caplog.text and "never awaited" not in caplog.text
+
+
+DIM = {"supported_color_modes": ["brightness"], "color_mode": "brightness", "brightness": 255, "supported_features": 0}
+
+
+async def test_colour_temperature_only_leaves_brightness_alone(hass, lights, freezer):
+    hass.states.async_set("light.dim", "on", DIM)
+    await _setup(hass, ["light.ct", "light.rgb", "light.dim"], adjust="color_temp")
+    sent = _sent(lights)
+    assert set(sent) == {"light.ct", "light.rgb"}                      # a bulb that only dims has nothing to set
+    assert "color_temp_kelvin" in sent["light.ct"] and "brightness_pct" not in sent["light.ct"]
+    assert "rgb_color" in sent["light.rgb"] and "brightness_pct" not in sent["light.rgb"]
+    assert hass.states.get("switch.lumaflow").attributes["adjusts"] == "color_temp"
+
+    # Dimming by hand isn't an override: brightness is the user's.
+    kelvin = sent["light.ct"]["color_temp_kelvin"]
+    hass.states.async_set("light.ct", "on", {**CT, "brightness": 20, "color_temp_kelvin": kelvin}, context=Context())
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["overridden_lights"] == []
+    lights.clear()
+    await _tick(hass, freezer, 60)
+    later = _sent(lights)["light.ct"]                                   # still on the curve an hour later
+    assert later["color_temp_kelvin"] < kelvin and "brightness_pct" not in later
+
+    # Changing the colour by hand still is.
+    hass.states.async_set("light.ct", "on", {**CT, "brightness": 20, "color_temp_kelvin": 5500}, context=Context())
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["overridden_lights"] == ["light.ct"]
+
+
+async def test_colour_temperature_only_does_not_repeat_itself(hass, lights, freezer):
+    """With nothing new to say about the colour, a tick sends nothing."""
+    freezer.move_to(dt_util.as_utc(datetime(2026, 10, 10, 12, 0, tzinfo=dt_util.get_time_zone(hass.config.time_zone))))
+    await _setup(hass, ["light.ct"], adjust="color_temp")              # midday: the curve is flat
+    assert "light.ct" in _sent(lights)
+    lights.clear()
+    await _tick(hass, freezer, 5)
+    assert not lights
+
+
+async def test_brightness_only_leaves_colour_alone(hass, lights):
+    await _setup(hass, ["light.ct", "light.rgb"], adjust="brightness")
+    sent = _sent(lights)
+    for entity_id in ("light.ct", "light.rgb"):
+        assert "brightness_pct" in sent[entity_id]
+        assert "color_temp_kelvin" not in sent[entity_id] and "rgb_color" not in sent[entity_id]
+
+    # Picking a colour by hand isn't an override; dimming by hand is.
+    level = round(sent["light.ct"]["brightness_pct"] / 100 * 255)
+    hass.states.async_set("light.ct", "on", {**CT, "brightness": level, "color_temp_kelvin": 3200}, context=Context())
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["overridden_lights"] == []
+    hass.states.async_set("light.ct", "on", {**CT, "brightness": 255, "color_temp_kelvin": 3200}, context=Context())
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["overridden_lights"] == ["light.ct"]
+
+
+async def test_fade_in_still_brightens_when_only_colour_is_adjusted(hass, freezer):
+    freezer.move_to(_sunset(hass) - timedelta(minutes=30))
+    hass.states.async_set("light.ct_off", "off", CT)
+    calls = async_mock_service(hass, "light", "turn_on")
+    await _setup(hass, ["light.ct_off"], fade_in=True, fade_in_minutes=60, adjust="color_temp")
+    sent = _sent(calls)["light.ct_off"]
+    assert sent["brightness_pct"] == 50 and sent["color_temp_kelvin"] == 6000   # switching on gradually needs a brightness
+
+    # Once it's up, the curve only touches the colour.
+    hass.states.async_set("light.ct_off", "on", {**CT, "brightness": 128}, context=_call_for(calls, "light.ct_off").context)
+    await hass.async_block_till_done()
+    calls.clear()
+    await _tick(hass, freezer, 31)       # the fade ends at sunset
+    await _tick(hass, freezer, 120)      # two hours into the wind-down
+    after = [c.data for c in calls if "light.ct_off" in str(c.data["entity_id"])][-1]
+    assert "color_temp_kelvin" in after and "brightness_pct" not in after
+
+
+async def test_what_to_adjust_is_offered_in_setup_and_options(hass, lights):
+    r = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    r = await hass.config_entries.flow.async_configure(r["flow_id"], {"name": "Hall", "lights": ["light.ct"]})
+    r = await hass.config_entries.flow.async_configure(r["flow_id"], {
+        "sunset_offset": 0, "transition_speed": "fast", "min_brightness": 5, "max_brightness": 90,
+        "min_color_temp": 2400, "max_color_temp": 5000, "adjust": "color_temp"})
+    r = await hass.config_entries.flow.async_configure(r["flow_id"], {"enable_override_detection": True, "restore_on_startup": True})
+    assert r["type"] == "create_entry" and r["data"]["adjust"] == "color_temp"
+    await hass.async_block_till_done()
+    entry = r["result"]
+
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {"lights": ["light.ct"], "mode": "circadian"})
+    assert "adjust" in str(r["data_schema"].schema)
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {
+        "sunset_offset": 0, "transition_speed": "fast", "min_brightness": 5, "max_brightness": 90, "min_color_temp": 2400,
+        "max_color_temp": 5000, "adjust": "brightness", "fade_in": False, "fade_in_minutes": 60,
+        "enable_override_detection": True, "restore_on_startup": True})
+    assert r["type"] == "create_entry" and entry.options["adjust"] == "brightness"
+    # The set-level mode has no curve, so it doesn't offer the choice.
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {"lights": ["light.ct"], "mode": "fade_in"})
+    assert "adjust" not in str(r["data_schema"].schema)

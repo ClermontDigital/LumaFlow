@@ -43,6 +43,7 @@ class LumaFlowSwitch(LumaFlowEntity, SwitchEntity, RestoreEntity):
         window = c.fade_window()
         return {
             "mode": c.mode,
+            "adjusts": c.adjust if c.follows_curve else None,
             "controlled_lights": lights,
             "lights_on": [e for e in lights if c._is_on(e)],  # noqa: SLF001
             "overridden_lights": sorted(c.overridden),

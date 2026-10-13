@@ -11,7 +11,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
-    CONF_ENABLE_OVERRIDE_DETECTION, CONF_FADE_IN, CONF_FADE_IN_BRIGHTNESS, CONF_FADE_IN_COLOR, CONF_FADE_IN_MINUTES,
+    ADJUSTS, CONF_ADJUST, CONF_ENABLE_OVERRIDE_DETECTION, CONF_FADE_IN, CONF_FADE_IN_BRIGHTNESS, CONF_FADE_IN_COLOR, CONF_FADE_IN_MINUTES,
     CONF_LIGHTS, CONF_MAX_BRIGHTNESS, CONF_MAX_COLOR_TEMP, CONF_MIN_BRIGHTNESS, CONF_MIN_COLOR_TEMP, CONF_MODE,
     CONF_RESTORE_ON_STARTUP, CONF_SUNSET_OFFSET, CONF_TRANSITION_SPEED, DEFAULTS, DOMAIN, FADE_COLORS, MODE_CIRCADIAN,
     MODES, NAME, TRANSITION_SPEEDS,
@@ -50,6 +50,8 @@ def _timing_schema(v: dict[str, Any]) -> vol.Schema:
             vol.Required(CONF_MAX_BRIGHTNESS, default=v[CONF_MAX_BRIGHTNESS]): PCT,
             vol.Required(CONF_MIN_COLOR_TEMP, default=v[CONF_MIN_COLOR_TEMP]): kelvin,
             vol.Required(CONF_MAX_COLOR_TEMP, default=v[CONF_MAX_COLOR_TEMP]): kelvin,
+            vol.Required(CONF_ADJUST, default=v[CONF_ADJUST]): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=ADJUSTS, translation_key="adjust")),
             vol.Required(CONF_FADE_IN, default=v[CONF_FADE_IN]): bool,
         })
     fields[vol.Required(CONF_FADE_IN_MINUTES, default=v[CONF_FADE_IN_MINUTES])] = selector.NumberSelector(

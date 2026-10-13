@@ -46,6 +46,10 @@ from homeassistant.util import dt as dt_util
 
 from . import circadian
 from .const import (
+    ADJUST_BOTH,
+    ADJUST_BRIGHTNESS,
+    ADJUST_COLOR_TEMP,
+    CONF_ADJUST,
     CONF_ENABLE_OVERRIDE_DETECTION,
     CONF_FADE_IN,
     CONF_FADE_IN_BRIGHTNESS,
@@ -125,6 +129,11 @@ class LumaFlowController:
     @property
     def follows_curve(self) -> bool:
         return self.mode == MODE_CIRCADIAN
+
+    @property
+    def adjust(self) -> str:
+        """What the curve sets on each light: both, only colour temperature, or only brightness."""
+        return self.config.get(CONF_ADJUST) or ADJUST_BOTH
 
     @property
     def fade_enabled(self) -> bool:
@@ -237,11 +246,12 @@ class LumaFlowController:
         state = self.hass.states.get(entity_id)
         return bool(state and set(state.attributes.get(ATTR_SUPPORTED_COLOR_MODES) or []) & COLOR_MODES_DIMMABLE)
 
-    def _command(self, entity_id: str, brightness: int, kelvin: int | None, white: bool = False) -> dict[str, Any] | None:
-        """light.turn_on data for one light, or None if it can't be dimmed.
+    def _command(self, entity_id: str, brightness: int | None, kelvin: int | None, white: bool = False) -> dict[str, Any] | None:
+        """light.turn_on data for one light, or None if there's nothing LumaFlow can set on it.
 
-        `kelvin` sets a colour temperature (mixed from RGB on colour-only bulbs); `white` sets plain
-        white instead; with neither, the light keeps its own colour.
+        `brightness` None leaves the light's brightness alone. `kelvin` sets a colour temperature
+        (mixed from RGB on colour-only bulbs); `white` sets plain white instead; with neither, the
+        light keeps its own colour.
         """
         state = self.hass.states.get(entity_id)
         if not state:
@@ -249,7 +259,9 @@ class LumaFlowController:
         modes = set(state.attributes.get(ATTR_SUPPORTED_COLOR_MODES) or [])
         if not modes & COLOR_MODES_DIMMABLE:
             return None   # on/off only
-        data: dict[str, Any] = {ATTR_BRIGHTNESS_PCT: max(1, min(100, int(brightness)))}
+        data: dict[str, Any] = {}
+        if brightness is not None:
+            data[ATTR_BRIGHTNESS_PCT] = max(1, min(100, int(brightness)))
         if white and kelvin is None:
             if modes & COLOR_MODES_RGB:
                 data[ATTR_RGB_COLOR] = (255, 255, 255)
@@ -262,12 +274,23 @@ class LumaFlowController:
         elif kelvin is not None and modes & COLOR_MODES_RGB:
             r, g, b = color_util.color_temperature_to_rgb(kelvin)
             data[ATTR_RGB_COLOR] = (round(r), round(g), round(b))
-        return data
+        return data or None   # e.g. colour temperature only, on a bulb that only dims
+
+    def _curve_command(self, entity_id: str, target: circadian.Target) -> dict[str, Any] | None:
+        """The curve's values for one light, leaving out whichever half the user keeps for themselves."""
+        adjust = self.adjust
+        return self._command(
+            entity_id,
+            None if adjust == ADJUST_COLOR_TEMP else target.brightness,
+            None if adjust == ADJUST_BRIGHTNESS else target.kelvin,
+        )
 
     def _fade_command(self, entity_id: str, target: circadian.Target, fraction: float) -> dict[str, Any] | None:
         fraction = min(1.0, max(0.0, fraction))
         if self.follows_curve:
-            return self._command(entity_id, max(1, round(target.brightness * fraction)), target.kelvin)
+            # A fade-in always ramps the brightness: that is what switching a light on gradually means.
+            kelvin = None if self.adjust == ADJUST_BRIGHTNESS else target.kelvin
+            return self._command(entity_id, max(1, round(target.brightness * fraction)), kelvin)
         level = int(self.config[CONF_FADE_IN_BRIGHTNESS])
         return self._command(entity_id, max(1, round(level * fraction)), None,
                              white=self.config[CONF_FADE_IN_COLOR] == "white")
@@ -276,7 +299,8 @@ class LumaFlowController:
         last = self._applied.get(entity_id)
         if not last:
             return True
-        if abs(last.get(ATTR_BRIGHTNESS_PCT, 0) - data.get(ATTR_BRIGHTNESS_PCT, 0)) >= MIN_STEP_BRIGHTNESS_PCT:
+        if ATTR_BRIGHTNESS_PCT in data and (
+                abs(last.get(ATTR_BRIGHTNESS_PCT, 0) - data[ATTR_BRIGHTNESS_PCT]) >= MIN_STEP_BRIGHTNESS_PCT):
             return True
         if ATTR_COLOR_TEMP_KELVIN in data:
             return abs(last.get(ATTR_COLOR_TEMP_KELVIN, 0) - data[ATTR_COLOR_TEMP_KELVIN]) >= MIN_STEP_KELVIN
@@ -310,7 +334,7 @@ class LumaFlowController:
             for entity_id in only or self.lights():
                 if entity_id in self.fading or entity_id in self.overridden or not self._is_on(entity_id):
                     continue
-                data = self._command(entity_id, target.brightness, target.kelvin)
+                data = self._curve_command(entity_id, target)
                 if data and (force or self._needs_update(entity_id, data)):
                     await self._send(entity_id, data, speed if transition is None else transition)
                     sent += 1

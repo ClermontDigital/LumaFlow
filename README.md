@@ -47,6 +47,7 @@ you touching a thing.
 ### ⚙️ **Flexible Configuration**
 - **Three-step setup** in the Home Assistant UI: lights, timing, advanced
 - **Customisable ranges**: brightness (1–100%) and colour temperature (2000–6500 K)
+- **Adjust both, or only one**: let LumaFlow handle just the colour temperature, or just the brightness
 - **Transition control**: slow (5 min), moderate (3 min) or fast (1 min) fades for each adjustment
 - **Change anything later** in the integration's options
 
@@ -168,6 +169,10 @@ LumaFlow follows the principles used in circadian lighting research:
    - **Transition speed**: how long each adjustment fades over (slow 5 min, moderate 3 min, fast 1 min)
    - **Night and day brightness**: from 1 to 100%
    - **Night and day colour temperature**: from 2000 to 6500 K. Each light is kept within its own range.
+   - **What to adjust** (circadian mode): brightness and colour temperature, colour temperature only, or
+     brightness only. With colour temperature only, LumaFlow never sets a light's brightness, and dimming one
+     by hand doesn't count as an override. With brightness only, the colour is left to you. Lights that can't
+     do the chosen half are skipped.
    - **Fade-in length**: how long before sunset the lights start coming on (5–180 minutes, default 60)
    - **Also turn lights on before sunset** (circadian mode), or **Brightness at sunset** and **Colour**
      (set-level mode: default 50%, white)
