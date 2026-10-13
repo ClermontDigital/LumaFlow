@@ -20,6 +20,7 @@ CONF_MAX_COLOR_TEMP = "max_color_temp"  # Kelvin
 CONF_ENABLE_OVERRIDE_DETECTION = "enable_override_detection"
 CONF_RESTORE_ON_STARTUP = "restore_on_startup"
 CONF_MODE = "mode"
+CONF_ADJUST = "adjust"                     # circadian mode: brightness, colour temperature, or both
 CONF_FADE_IN = "fade_in"                   # circadian mode: also turn lights on before sunset
 CONF_FADE_IN_MINUTES = "fade_in_minutes"   # how long before sunset the fade starts
 CONF_FADE_IN_BRIGHTNESS = "fade_in_brightness"   # set-level mode: where the fade ends, %
@@ -29,6 +30,10 @@ MODE_CIRCADIAN = "circadian"   # lights follow the curve all day and night
 MODE_FADE_IN = "fade_in"       # lights fade on to a set level before sunset, and are otherwise left alone
 MODES = [MODE_CIRCADIAN, MODE_FADE_IN]
 FADE_COLORS = ["white", "keep"]
+ADJUST_BOTH = "both"
+ADJUST_COLOR_TEMP = "color_temp"   # leave brightness to you
+ADJUST_BRIGHTNESS = "brightness"   # leave colour to you
+ADJUSTS = [ADJUST_BOTH, ADJUST_COLOR_TEMP, ADJUST_BRIGHTNESS]
 FADE_WHITE_KELVIN = 4000       # "white" on bulbs that only do colour temperature
 
 DEFAULTS = {
@@ -41,6 +46,7 @@ DEFAULTS = {
     CONF_ENABLE_OVERRIDE_DETECTION: True,
     CONF_RESTORE_ON_STARTUP: True,
     CONF_MODE: MODE_CIRCADIAN,
+    CONF_ADJUST: ADJUST_BOTH,
     CONF_FADE_IN: False,
     CONF_FADE_IN_MINUTES: 60,
     CONF_FADE_IN_BRIGHTNESS: 50,

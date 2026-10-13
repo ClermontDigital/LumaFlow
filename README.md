@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/ClermontDigital/LumaFlow/releases)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/ClermontDigital/LumaFlow/releases)
 
 LumaFlow automatically adjusts your smart lights to follow natural circadian rhythms, and can switch
 them on before sunset so the house is lit by the time it's dark. It takes
@@ -47,6 +47,7 @@ you touching a thing.
 ### ⚙️ **Flexible Configuration**
 - **Three-step setup** in the Home Assistant UI: lights, timing, advanced
 - **Customisable ranges**: brightness (1–100%) and colour temperature (2000–6500 K)
+- **Adjust both, or only one**: let LumaFlow handle just the colour temperature, or just the brightness
 - **Transition control**: slow (5 min), moderate (3 min) or fast (1 min) fades for each adjustment
 - **Change anything later** in the integration's options
 
@@ -106,7 +107,11 @@ the circadian mode.
   - in **circadian mode**, up to the curve's value, and from then on they follow the curve as usual
 - Lights that are **already on** aren't touched by the fade.
 - **Once per evening**: turn a light off during or after the fade and it stays off. Adjust one mid-fade and
-  LumaFlow stops fading it.
+  LumaFlow stops fading it, and leaves it alone like any other light changed by hand.
+- **With "What to adjust" set to one half**, the fade still brightens the lights it switches on, because
+  switching a light on gradually needs a brightness. With colour temperature only, their brightness is
+  yours again once the fade ends; with brightness only, the fade doesn't set a colour.
+- Switching LumaFlow off during a fade ends that evening's fade.
 - In set-level mode, LumaFlow does nothing else: lights you switch on at other times are left as they are.
 
 ### ⚡ **Smart Activation**
@@ -168,6 +173,10 @@ LumaFlow follows the principles used in circadian lighting research:
    - **Transition speed**: how long each adjustment fades over (slow 5 min, moderate 3 min, fast 1 min)
    - **Night and day brightness**: from 1 to 100%
    - **Night and day colour temperature**: from 2000 to 6500 K. Each light is kept within its own range.
+   - **What to adjust** (circadian mode): brightness and colour temperature, colour temperature only, or
+     brightness only. With colour temperature only, the curve leaves a light's brightness alone, and dimming one
+     by hand doesn't count as an override. With brightness only, the colour is left to you. The curve skips
+     lights that can't do the chosen half. A fade-in still brightens the lights it switches on (see below).
    - **Fade-in length**: how long before sunset the lights start coming on (5–180 minutes, default 60)
    - **Also turn lights on before sunset** (circadian mode), or **Brightness at sunset** and **Colour**
      (set-level mode: default 50%, white)
@@ -226,8 +235,9 @@ data:
 
 The names below are for an entry called "LumaFlow". A second entry gets its own name.
 
-- **Switch** `switch.lumaflow`: enable or disable. Its attributes give the mode, the controlled lights,
-  which are on, which are overridden, which are fading on (`fading_lights`), and today's fade-in window.
+- **Switch** `switch.lumaflow`: enable or disable. Its attributes give the mode, what the curve adjusts
+  (`adjusts`: `both`, `color_temp` or `brightness`), the controlled lights, which are on, which are
+  overridden, which are fading on (`fading_lights`), and today's fade-in window.
 - **Sensor** `sensor.lumaflow_current_phase`: `sunrise`, `day`, `sunset`, `evening` or `night`.
   Its attributes include the target brightness and colour temperature, today's sunrise and sunset,
   and the overridden lights.
@@ -360,6 +370,17 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements_test.txt
 - **Time-limited overrides**
 
 ## Changelog
+
+### Version 1.2.0
+- **Choose what to adjust.** In circadian mode LumaFlow can now set brightness and colour temperature,
+  colour temperature only, or brightness only. The half it isn't adjusting is yours: changing it by hand
+  isn't treated as an override. ([#3](https://github.com/ClermontDigital/LumaFlow/issues/3))
+- Switching LumaFlow off during a fade-in ends that evening's fade, and the lights no longer stay listed
+  in `fading_lights`.
+- Fixed `lumaflow.restore_lights` re-sending to every light when none of the named lights belonged to
+  that entry.
+- A colour bulb that reports its colour dimmed along with its brightness is no longer mistaken for one
+  changed by hand.
 
 ### Version 1.1.1
 - Fixed loading while Home Assistant starts. The "Home Assistant has started" hook ran outside the
