@@ -84,6 +84,12 @@ COLOR_MODES_RGB = {ColorMode.HS, ColorMode.XY, ColorMode.RGB, ColorMode.RGBW, Co
 COLOR_MODES_DIMMABLE = COLOR_MODES_RGB | {ColorMode.COLOR_TEMP, ColorMode.BRIGHTNESS, ColorMode.WHITE}
 
 
+def _full_scale(rgb: Any) -> tuple[float, ...]:
+    """An RGB colour with its brightest channel at 255, so the same colour dimmed compares as equal."""
+    top = max(rgb) or 1
+    return tuple(c * 255 / top for c in rgb)
+
+
 def entry_config(entry: ConfigEntry) -> dict[str, Any]:
     """Settings for an entry: options win over the original setup data."""
     return {**DEFAULTS, **entry.data, **entry.options}
@@ -331,7 +337,7 @@ class LumaFlowController:
         speed = TRANSITION_SPEEDS.get(self.config[CONF_TRANSITION_SPEED], 180)
         sent = await self._fade_step(target, force)
         if self.follows_curve:
-            for entity_id in only or self.lights():
+            for entity_id in self.lights() if only is None else only:
                 if entity_id in self.fading or entity_id in self.overridden or not self._is_on(entity_id):
                     continue
                 data = self._curve_command(entity_id, target)
@@ -399,15 +405,29 @@ class LumaFlowController:
         ctx = event.context
         return ctx.id in self._contexts or (ctx.parent_id is not None and ctx.parent_id in self._contexts)
 
+    def _owns(self, entity_id: str) -> tuple[bool, bool]:
+        """Which halves LumaFlow is setting on this light right now: (brightness, colour).
+
+        The other half is the user's, so changing it by hand is not an override. A fade-in sets
+        whatever it was asked to, whichever half the curve adjusts afterwards.
+        """
+        if entity_id in self.fading or not self.follows_curve:
+            return True, True
+        adjust = self.adjust
+        return adjust != ADJUST_COLOR_TEMP, adjust != ADJUST_BRIGHTNESS
+
     def _drifted(self, entity_id: str, new_attrs: dict[str, Any]) -> bool:
         """Has the light moved away from what LumaFlow last set, by more than rounding and lag?"""
         last = self._applied.get(entity_id)
         if not last:
             return False
+        owns_brightness, owns_colour = self._owns(entity_id)
         bri = new_attrs.get(ATTR_BRIGHTNESS)
-        if bri is not None and ATTR_BRIGHTNESS_PCT in last:
+        if owns_brightness and bri is not None and ATTR_BRIGHTNESS_PCT in last:
             if abs(bri / 255 * 100 - last[ATTR_BRIGHTNESS_PCT]) > OVERRIDE_BRIGHTNESS_PCT:
                 return True
+        if not owns_colour:
+            return False
         if ATTR_COLOR_TEMP_KELVIN in last:
             mode = new_attrs.get(ATTR_COLOR_MODE)
             if mode and mode != ColorMode.COLOR_TEMP:
@@ -417,7 +437,7 @@ class LumaFlowController:
                 return True
         elif ATTR_RGB_COLOR in last:
             rgb = new_attrs.get(ATTR_RGB_COLOR)
-            if rgb is not None and max(abs(a - b) for a, b in zip(rgb, last[ATTR_RGB_COLOR])) > 25:
+            if rgb is not None and max(abs(a - b) for a, b in zip(_full_scale(rgb), _full_scale(last[ATTR_RGB_COLOR]))) > 25:
                 return True
         return False
 
@@ -460,6 +480,8 @@ class LumaFlowController:
         self.enabled = enabled
         if enabled:
             await self.async_apply(force=True)
+        else:
+            self.fading.clear()   # switched off mid-fade: the fade is over, it doesn't resume later
         self._notify()
 
     async def async_restore(self, lights: list[str] | None = None) -> None:

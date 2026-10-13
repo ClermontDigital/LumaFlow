@@ -278,16 +278,6 @@ async def test_colour_temperature_only_leaves_brightness_alone(hass, lights, fre
     assert hass.states.get("switch.lumaflow").attributes["overridden_lights"] == ["light.ct"]
 
 
-async def test_colour_temperature_only_does_not_repeat_itself(hass, lights, freezer):
-    """With nothing new to say about the colour, a tick sends nothing."""
-    freezer.move_to(dt_util.as_utc(datetime(2026, 10, 10, 12, 0, tzinfo=dt_util.get_time_zone(hass.config.time_zone))))
-    await _setup(hass, ["light.ct"], adjust="color_temp")              # midday: the curve is flat
-    assert "light.ct" in _sent(lights)
-    lights.clear()
-    await _tick(hass, freezer, 5)
-    assert not lights
-
-
 async def test_brightness_only_leaves_colour_alone(hass, lights):
     await _setup(hass, ["light.ct", "light.rgb"], adjust="brightness")
     sent = _sent(lights)
@@ -305,22 +295,110 @@ async def test_brightness_only_leaves_colour_alone(hass, lights):
     assert hass.states.get("switch.lumaflow").attributes["overridden_lights"] == ["light.ct"]
 
 
-async def test_fade_in_still_brightens_when_only_colour_is_adjusted(hass, freezer):
+async def _faded_on(hass, freezer, **options):
+    """A colour-temperature lamp that LumaFlow fades on from 30 minutes before sunset. Returns the calls."""
     freezer.move_to(_sunset(hass) - timedelta(minutes=30))
     hass.states.async_set("light.ct_off", "off", CT)
     calls = async_mock_service(hass, "light", "turn_on")
-    await _setup(hass, ["light.ct_off"], fade_in=True, fade_in_minutes=60, adjust="color_temp")
+    await _setup(hass, ["light.ct_off"], fade_in=True, fade_in_minutes=60, **options)
+    return calls
+
+
+def _report(hass, calls, **attrs):
+    """The bulb reports the state LumaFlow last asked for (under LumaFlow's context), with any changes given."""
+    call = _call_for(calls, "light.ct_off")
+    state = {**CT, "brightness": round(call.data.get("brightness_pct", 100) / 100 * 255),
+             "color_temp_kelvin": call.data.get("color_temp_kelvin", CT["color_temp_kelvin"]), **attrs}
+    hass.states.async_set("light.ct_off", "on", state, context=call.context)
+
+
+async def test_fade_in_still_brightens_when_only_colour_is_adjusted(hass, freezer):
+    calls = await _faded_on(hass, freezer, adjust="color_temp")
     sent = _sent(calls)["light.ct_off"]
     assert sent["brightness_pct"] == 50 and sent["color_temp_kelvin"] == 6000   # switching on gradually needs a brightness
-
-    # Once it's up, the curve only touches the colour.
-    hass.states.async_set("light.ct_off", "on", {**CT, "brightness": 128}, context=_call_for(calls, "light.ct_off").context)
+    _report(hass, calls)
     await hass.async_block_till_done()
+    await _tick(hass, freezer, 31)       # the fade ends at sunset, on full brightness
+    assert _call_for(calls, "light.ct_off").data["brightness_pct"] == 100
+    _report(hass, calls)
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["fading_lights"] == []
+
+    # Nothing new to say about the colour yet (the bulb tops out at 6000 K), so nothing is sent.
     calls.clear()
-    await _tick(hass, freezer, 31)       # the fade ends at sunset
-    await _tick(hass, freezer, 120)      # two hours into the wind-down
-    after = [c.data for c in calls if "light.ct_off" in str(c.data["entity_id"])][-1]
-    assert "color_temp_kelvin" in after and "brightness_pct" not in after
+    await _tick(hass, freezer, 5)
+    assert not calls
+
+    # Dimming by hand after the fade isn't an override: the brightness is the user's again.
+    hass.states.async_set("light.ct_off", "on", {**CT, "brightness": 51}, context=Context())
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["overridden_lights"] == []
+    await _tick(hass, freezer, 120)      # two hours into the wind-down the colour is still following
+    after = _call_for(calls, "light.ct_off").data
+    assert after["color_temp_kelvin"] < 6000 and "brightness_pct" not in after
+
+
+async def test_dimming_during_the_fade_is_an_override_in_every_mode(hass, freezer):
+    calls = await _faded_on(hass, freezer, adjust="color_temp")
+    _report(hass, calls)
+    await hass.async_block_till_done()
+    hass.states.async_set("light.ct_off", "on", {**CT, "brightness": 10}, context=Context())
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["overridden_lights"] == ["light.ct_off"]
+
+
+async def test_fade_in_sets_no_colour_when_only_brightness_is_adjusted(hass, freezer):
+    calls = await _faded_on(hass, freezer, adjust="brightness")
+    sent = _sent(calls)["light.ct_off"]
+    assert sent["brightness_pct"] == 50 and "color_temp_kelvin" not in sent and "rgb_color" not in sent
+
+
+async def test_switching_off_mid_fade_ends_the_fade(hass, freezer):
+    calls = await _faded_on(hass, freezer, adjust="color_temp")
+    _report(hass, calls)
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["fading_lights"] == ["light.ct_off"]
+    await hass.services.async_call("switch", "turn_off", {"entity_id": "switch.lumaflow"}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["fading_lights"] == []
+
+    # Someone sets the lamp while LumaFlow is off; switching it back on hours later must not touch the brightness.
+    hass.states.async_set("light.ct_off", "on", {**CT, "brightness": 51}, context=Context())
+    await _tick(hass, freezer, 180)
+    calls.clear()
+    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.lumaflow"}, blocking=True)
+    await hass.async_block_till_done()
+    back = _sent(calls)["light.ct_off"]
+    assert "color_temp_kelvin" in back and "brightness_pct" not in back
+
+
+RGB_REPORTING = {**RGB, "color_mode": "rgb", "supported_color_modes": ["rgb"]}
+
+
+async def test_colour_bulb_in_colour_temperature_only_mode(hass, lights):
+    await _setup(hass, ["light.rgb"], adjust="color_temp")
+    call = lights[-1]
+    r, g, b = call.data["rgb_color"]
+    assert "brightness_pct" not in call.data
+    hass.states.async_set("light.rgb", "on", {**RGB_REPORTING, "rgb_color": (r, g, b)}, context=call.context)
+    await hass.async_block_till_done()
+
+    # Dimmed by hand, by a bulb that reports its colour dimmed too: the same colour, so not an override.
+    hass.states.async_set("light.rgb", "on", {**RGB_REPORTING, "brightness": 64, "rgb_color": (r // 4, g // 4, b // 4)}, context=Context())
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["overridden_lights"] == []
+    # A different colour is.
+    hass.states.async_set("light.rgb", "on", {**RGB_REPORTING, "brightness": 64, "rgb_color": (0, 80, 255)}, context=Context())
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.lumaflow").attributes["overridden_lights"] == ["light.rgb"]
+
+
+async def test_restoring_a_light_that_is_not_ours_sends_nothing(hass, lights):
+    await _setup(hass, ["light.ct"])
+    lights.clear()
+    await hass.services.async_call(DOMAIN, "restore_lights", {"lights": ["light.rgb"]}, blocking=True)
+    await hass.async_block_till_done()
+    assert not lights
 
 
 async def test_what_to_adjust_is_offered_in_setup_and_options(hass, lights):

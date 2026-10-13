@@ -36,7 +36,7 @@
           "fade_in_minutes": "How long before sunset (plus the offset) the fade starts. The lights are fully on at sunset.",
           "fade_in_brightness": "Where the fade ends. After that LumaFlow leaves the lights alone.",
           "fade_in_color": "White, or keep whatever colour each light was last set to.",
-          "adjust": "Both, or only one. With colour temperature only, LumaFlow never sets brightness, so dimming a light by hand isn't an override. With brightness only, the colour is yours."
+          "adjust": "Both, or only one. With colour temperature only, LumaFlow leaves brightness alone, so dimming a light by hand isn't an override. With brightness only, the colour is yours. A fade-in still brightens the lights it switches on."
         }
       },
       "advanced": {
@@ -87,7 +87,7 @@
           "fade_in_brightness": "Where the fade ends. After that LumaFlow leaves the lights alone.",
           "fade_in_color": "White, or keep whatever colour each light was last set to.",
           "sunset_offset": "Shift sunset earlier (negative) or later. The fade ends, and the evening wind-down starts, at this time.",
-          "adjust": "Both, or only one. With colour temperature only, LumaFlow never sets brightness, so dimming a light by hand isn't an override. With brightness only, the colour is yours."
+          "adjust": "Both, or only one. With colour temperature only, LumaFlow leaves brightness alone, so dimming a light by hand isn't an override. With brightness only, the colour is yours. A fade-in still brightens the lights it switches on."
         }
       }
     },
