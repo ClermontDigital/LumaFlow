@@ -1,6 +1,6 @@
 # LumaFlow - Circadian Rhythm Lighting for Home Assistant
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/ClermontDigital/LumaFlow/releases)
 
@@ -421,7 +421,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements_test.txt
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [Apache License 2.0](LICENSE).
 
 ## Acknowledgments
 
